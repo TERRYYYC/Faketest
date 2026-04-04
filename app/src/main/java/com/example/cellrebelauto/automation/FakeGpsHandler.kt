@@ -229,18 +229,31 @@ class FakeGpsHandler(
                 val root = bridge.getRootNode() ?: run { delay(POLL_INTERVAL); continue }
                 val startBtn = findStartButton(root)
                 if (startBtn != null) {
-                    // # 先尝试 ACTION_CLICK，再用坐标兜底（同 CellRebel 的经验）
-                    bridge.clickNode(startBtn)
                     val (cx, cy) = bridge.getNodeCenter(startBtn)
-                    delay(500)
+
+                    // # 第一次尝试：ACTION_CLICK
+                    bridge.clickNode(startBtn)
+                    log("Clicked 'Start Fake GPS' via ACTION_CLICK at ($cx, $cy)")
+                    delay(1000)
+
+                    // # 检查第一次点击是否已成功（Stop 按钮出现 = GPS 已启动）
+                    val checkRoot1 = bridge.getRootNode()
+                    if (checkRoot1 != null && findStopButton(checkRoot1) != null) {
+                        log("Fake GPS confirmed active after ACTION_CLICK")
+                        return@withTimeout
+                    }
+
+                    // # 第一次没生效，用坐标点击兜底
+                    log("ACTION_CLICK didn't trigger start, retrying with dispatchTap...")
                     bridge.dispatchTap(cx, cy)
-                    log("Clicked 'Start Fake GPS' at ($cx, $cy)")
                     delay(1500)
 
-                    // # 验证 GPS 已启动（Stop 按钮应该出现）
-                    val verifyRoot = bridge.getRootNode()
-                    if (verifyRoot != null && findStopButton(verifyRoot) != null) {
-                        log("Fake GPS confirmed active")
+                    // # 再次验证
+                    val checkRoot2 = bridge.getRootNode()
+                    if (checkRoot2 != null && findStopButton(checkRoot2) != null) {
+                        log("Fake GPS confirmed active after dispatchTap")
+                    } else {
+                        log("WARNING: Start Fake GPS clicked but Stop button not found")
                     }
                     return@withTimeout
                 }
