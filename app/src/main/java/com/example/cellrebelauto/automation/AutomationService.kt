@@ -3,6 +3,7 @@ package com.example.cellrebelauto.automation
 import android.accessibilityservice.AccessibilityService
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import com.example.cellrebelauto.db.AppDatabase
 import com.example.cellrebelauto.model.AutoConfig
 import com.example.cellrebelauto.model.AutomationState
@@ -39,9 +40,13 @@ class AutomationService : AccessibilityService() {
     private var automationJob: Job? = null
     // # 当前引擎实例
     private var engine: AutomationEngine? = null
+    // # MIUI 弹窗去抖：上次自动点击"允许"的时间戳
+    private var lastMiuiDismissTime = 0L
 
     companion object {
         private const val TAG = "AutomationSvc"
+        // # MIUI SecurityCenter 包名（后台启动拦截弹窗的来源）
+        private const val MIUI_SECURITY_PKG = "com.miui.securitycenter"
 
         // # 服务实例引用（供 UI 调用）
         private var instance: AutomationService? = null
@@ -110,8 +115,105 @@ class AutomationService : AccessibilityService() {
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
-        // # 新架构下不需要处理事件 — 引擎使用轮询模式
-        // # 但保留方法以满足 AccessibilityService 的要求
+        if (event == null || !_isRunning.value) return
+        // # 检测 MIUI SecurityCenter 弹窗并自动点击"允许"
+        when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                val pkg = event.packageName?.toString() ?: return
+                if (pkg == MIUI_SECURITY_PKG) {
+                    autoAllowMiuiStartConfirmation()
+                }
+            }
+        }
+    }
+
+    /**
+     * Detects MIUI's ConfirmStartActivity and auto-clicks the "Allow" button.
+     *
+     * # MIUI 后台启动管控会弹出 ConfirmStartActivity 要求用户确认。
+     * # 利用无障碍服务自动找到"允许"按钮并点击，绕过拦截。
+     *
+     * # 已知弹窗类名：com.miui.wakepath.ui.ConfirmStartActivity
+     * # 按钮文本因 MIUI 版本和语言不同可能为：允许/Allow/确定/确认
+     */
+    private fun autoAllowMiuiStartConfirmation() {
+        // # 去抖：2 秒内不重复处理
+        val now = System.currentTimeMillis()
+        if (now - lastMiuiDismissTime < 2000L) return
+
+        val root = findSecurityCenterRoot()
+        if (root == null) {
+            Log.d(TAG, "[MIUI] SecurityCenter event received but window root not found")
+            return
+        }
+
+        // # 按优先级尝试各种"允许"按钮文本
+        val allowTexts = listOf("允许", "Allow", "确定", "确认", "OK", "同意")
+        for (text in allowTexts) {
+            val btn = NodeFinder.findByText(root, text)
+            if (btn != null) {
+                clickNodeWalkingUp(btn)
+                lastMiuiDismissTime = now
+                Log.d(TAG, "[MIUI] Auto-clicked '$text' on ConfirmStartActivity")
+                addLog("[MIUI] Auto-allowed app start ('$text')")
+                return
+            }
+        }
+
+        // # 兜底：MIUI 对话框通常两个按钮，右边是"允许"
+        val allNodes = NodeFinder.flatten(root)
+        val buttons = allNodes.filter {
+            it.isClickable && it.className?.toString()?.contains("Button") == true
+        }
+        if (buttons.size >= 2) {
+            val rightBtn = buttons.maxByOrNull {
+                val rect = android.graphics.Rect()
+                it.getBoundsInScreen(rect)
+                rect.centerX()
+            }
+            rightBtn?.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+            lastMiuiDismissTime = now
+            Log.d(TAG, "[MIUI] Clicked rightmost button as fallback")
+            addLog("[MIUI] Auto-allowed app start (fallback)")
+        } else {
+            Log.w(TAG, "[MIUI] SecurityCenter dialog detected but no allow button found")
+            addLog("[MIUI] WARNING: Could not find allow button in confirmation dialog")
+        }
+    }
+
+    /**
+     * Finds the root node of the MIUI SecurityCenter window.
+     * Tries rootInActiveWindow first, then searches all interactive windows.
+     * # 查找 MIUI SecurityCenter 窗口的根节点
+     */
+    private fun findSecurityCenterRoot(): AccessibilityNodeInfo? {
+        val root = rootInActiveWindow
+        if (root?.packageName?.toString() == MIUI_SECURITY_PKG) return root
+        // # rootInActiveWindow 可能不是 SecurityCenter，遍历所有窗口
+        return try {
+            windows?.firstOrNull {
+                it.root?.packageName?.toString() == MIUI_SECURITY_PKG
+            }?.root
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    /**
+     * Clicks a node, walking up to the nearest clickable ancestor.
+     * # 点击节点，向上查找可点击的父节点
+     */
+    private fun clickNodeWalkingUp(node: AccessibilityNodeInfo) {
+        var target: AccessibilityNodeInfo? = node
+        while (target != null) {
+            if (target.isClickable) {
+                target.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+                return
+            }
+            target = target.parent
+        }
+        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
     }
 
     override fun onInterrupt() {
@@ -153,6 +255,7 @@ class AutomationService : AccessibilityService() {
         val newEngine = AutomationEngine(
             config = config,
             repository = repository,
+            bridge = bridge,
             cellRebelHandler = cellRebelHandler,
             fakeGpsHandler = fakeGpsHandler
         )

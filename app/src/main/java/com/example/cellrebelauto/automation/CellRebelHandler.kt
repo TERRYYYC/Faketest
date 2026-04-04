@@ -23,8 +23,10 @@ class CellRebelHandler(
         private const val TAG = "CellRebelHandler"
         // # 轮询间隔（毫秒）
         private const val POLL_INTERVAL = 1500L
-        // # 等待应用启动的超时时间
-        private const val APP_LAUNCH_TIMEOUT = 15_000L
+        // # 等待应用启动的超时时间（含 MIUI 弹窗自动放行的时间）
+        private const val APP_LAUNCH_TIMEOUT = 20_000L
+        // # MIUI SecurityCenter 包名
+        private const val MIUI_SECURITY_PKG = "com.miui.securitycenter"
         // # 导航到测试页面的超时时间
         private const val NAVIGATION_TIMEOUT = 20_000L
         // # 点击 Start 后固定等待时间（30 秒）
@@ -83,17 +85,119 @@ class CellRebelHandler(
     /**
      * Launches CellRebel and polls until it's in the foreground.
      * # 启动 CellRebel 并轮询直到它出现在前台
+     *
+     * # [2026-04-02] MIUI 会静默拦截从 AccessibilityService 发起的 startActivity，
+     * # 当前台是第三方 app 时连 launchSelf() 都被封杀。
+     * # 解决方案：通过最近任务（GLOBAL_ACTION_RECENTS）切换，
+     * # 这走系统 UI 层面，MIUI 不会拦截。
      */
     private suspend fun launchAndWaitForForeground() {
-        bridge.launchApp(PACKAGE)
-        withTimeout(APP_LAUNCH_TIMEOUT) {
-            while (true) {
-                if (bridge.getCurrentPackage() == PACKAGE) return@withTimeout
-                delay(POLL_INTERVAL)
+        if (bridge.getCurrentPackage() == PACKAGE) {
+            delay(1000)
+            return
+        }
+
+        val selfPkg = bridge.getServicePackageName()
+        val currentPkg = bridge.getCurrentPackage()
+
+        // # 第三方 app 在前台时，startActivity 被 MIUI 封杀，走最近任务切换
+        if (currentPkg != null && currentPkg != selfPkg && currentPkg != PACKAGE) {
+            log("[MIUI] foreground=$currentPkg, switching via Recent Apps...")
+            val switched = switchViaRecents()
+            if (switched && bridge.getCurrentPackage() == PACKAGE) {
+                log("CellRebel is foreground (via recents)")
+                delay(1000)
+                return
             }
         }
-        // # 等待 UI 加载
+
+        // # 回退：直接 startActivity（当我们自己在前台时能工作）
+        bridge.launchApp(PACKAGE)
+        log("Launch CellRebel intent sent (direct)")
+
+        // # 等待 CellRebel 出现在前台
+        val launched = withTimeoutOrNull(APP_LAUNCH_TIMEOUT) {
+            while (true) {
+                delay(1500)
+                val pkg = bridge.getCurrentPackage()
+                if (pkg == PACKAGE) {
+                    log("CellRebel is foreground")
+                    return@withTimeoutOrNull true
+                }
+                if (pkg == MIUI_SECURITY_PKG) {
+                    log("[MIUI] Confirmation dialog showing, waiting for auto-dismiss...")
+                    continue
+                }
+                log("[DIAG] foreground=$pkg, retrying via recents...")
+                switchViaRecents()
+            }
+        }
+
+        if (launched != true) {
+            error("Failed to launch CellRebel after ${APP_LAUNCH_TIMEOUT / 1000}s (foreground=${bridge.getCurrentPackage()})")
+        }
         delay(1000)
+    }
+
+    /**
+     * Opens Recent Apps, finds CellRebel's card, and taps it.
+     * Returns true if the card was found and tapped.
+     *
+     * # 打开最近任务 → 找到 CellRebel 卡片 → 点击
+     * # 返回 true 表示找到并点击了卡片
+     */
+    private suspend fun switchViaRecents(): Boolean {
+        bridge.openRecents()
+        delay(1500) // # 等待最近任务动画完成
+
+        for (attempt in 1..3) {
+            val root = bridge.getRootNode()
+            if (root == null) {
+                delay(500)
+                continue
+            }
+
+            val card = findCellRebelInRecents(root)
+            if (card != null) {
+                log("Found CellRebel in recents, tapping...")
+                bridge.clickNode(card)
+                delay(300)
+                // # dispatchTap 兜底
+                val (cx, cy) = bridge.getNodeCenter(card)
+                bridge.dispatchTap(cx, cy)
+                delay(1500) // # 等待切换动画
+                return true
+            }
+
+            // # 第一次找不到时输出诊断信息
+            if (attempt == 1) {
+                val allNodes = NodeFinder.flatten(root)
+                val texts = allNodes.mapNotNull { it.text?.toString() }
+                    .take(20).joinToString(" | ")
+                log("[DIAG] Recents texts: [$texts]")
+                val descs = allNodes.mapNotNull { it.contentDescription?.toString() }
+                    .take(20).joinToString(" | ")
+                log("[DIAG] Recents descriptions: [$descs]")
+            }
+            delay(500)
+        }
+
+        log("CellRebel not found in recents")
+        bridge.goBack() // # 关闭最近任务
+        delay(500)
+        return false
+    }
+
+    /**
+     * Searches for CellRebel's card in the recents accessibility tree.
+     * # 在最近任务的无障碍树中查找 CellRebel 的卡片
+     */
+    private fun findCellRebelInRecents(root: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+        // # 按 app 名称搜索（text 和 contentDescription 都试）
+        return NodeFinder.findByText(root, "CellRebel")
+            ?: NodeFinder.findByText(root, "Cell Rebel")
+            ?: NodeFinder.findByContentDescription(root, "CellRebel")
+            ?: NodeFinder.findByContentDescription(root, "Cell Rebel")
     }
 
     /**

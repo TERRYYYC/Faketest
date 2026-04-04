@@ -176,7 +176,60 @@ class AccessibilityBridge(private val service: AccessibilityService) {
         }
     }
 
+    // ---- Global actions ----
+
+    /**
+     * Presses the Home button.
+     * # 按 Home 键回到桌面
+     */
+    fun goHome() {
+        service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
+    }
+
+    /**
+     * Presses the Back button.
+     * # 按返回键
+     */
+    fun goBack() {
+        service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK)
+    }
+
+    /**
+     * Opens the Recent Apps screen.
+     * # 打开最近任务界面
+     */
+    fun openRecents() {
+        service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_RECENTS)
+    }
+
     // ---- App launching ----
+
+    /**
+     * Returns the package name of this accessibility service's host app.
+     * # 获取宿主应用的包名
+     */
+    fun getServicePackageName(): String = service.packageName
+
+    /**
+     * Returns the user-visible label of this app (e.g. "CellRebelAuto").
+     * Used to find our own app in the Recent Apps screen.
+     * # 获取本 app 的用户可见名称，用于在最近任务中查找自己
+     */
+    fun getSelfAppLabel(): String {
+        return try {
+            val appInfo = service.packageManager.getApplicationInfo(service.packageName, 0)
+            service.packageManager.getApplicationLabel(appInfo).toString()
+        } catch (_: Exception) {
+            service.packageName
+        }
+    }
+
+    /**
+     * Launches the host app itself (brings it to foreground).
+     * # 启动自身宿主应用（拉回前台）
+     * # MIUI workaround: 从自己的前台启动第三方 app 不会被拦截
+     */
+    fun launchSelf(): Boolean = launchApp(service.packageName)
 
     /**
      * Launches the app with the given package name.

@@ -61,8 +61,9 @@ class FakeGpsHandler(
         log("Searching location: $lat, $lng")
         searchCoordinates(lat, lng)
 
-        // # 第 4 步：等待地图加载
-        log("Waiting for map to load...")
+        // # 第 4 步：收起键盘（点击地图区域）+ 等待地图加载
+        log("Dismissing keyboard & waiting for map to load...")
+        dismissKeyboard()
         delay(MAP_LOAD_DELAY)
 
         // # 第 5 步：点击地图中心放置标记
@@ -222,14 +223,19 @@ class FakeGpsHandler(
      * # 点击 "Start Fake GPS" 按钮
      */
     private suspend fun clickStartFakeGps() {
+        var diagLogged = false
         withTimeout(ACTION_TIMEOUT) {
             while (true) {
                 val root = bridge.getRootNode() ?: run { delay(POLL_INTERVAL); continue }
                 val startBtn = findStartButton(root)
                 if (startBtn != null) {
+                    // # 先尝试 ACTION_CLICK，再用坐标兜底（同 CellRebel 的经验）
                     bridge.clickNode(startBtn)
-                    log("Clicked 'Start Fake GPS'")
-                    delay(1000)
+                    val (cx, cy) = bridge.getNodeCenter(startBtn)
+                    delay(500)
+                    bridge.dispatchTap(cx, cy)
+                    log("Clicked 'Start Fake GPS' at ($cx, $cy)")
+                    delay(1500)
 
                     // # 验证 GPS 已启动（Stop 按钮应该出现）
                     val verifyRoot = bridge.getRootNode()
@@ -238,9 +244,31 @@ class FakeGpsHandler(
                     }
                     return@withTimeout
                 }
+
+                // # 找不到按钮时输出一次诊断
+                if (!diagLogged) {
+                    val allNodes = NodeFinder.flatten(root)
+                    val texts = allNodes.mapNotNull { it.text?.toString() }
+                        .take(15).joinToString(" | ")
+                    log("[DIAG] Start Fake GPS not found. pkg=${root.packageName}, texts=[$texts]")
+                    diagLogged = true
+                }
                 delay(POLL_INTERVAL)
             }
         }
+    }
+
+    /**
+     * Dismisses the keyboard by pressing Back gesture.
+     * # 收起键盘：点击地图区域让搜索框失焦
+     */
+    private suspend fun dismissKeyboard() {
+        val root = bridge.getRootNode() ?: return
+        val bounds = android.graphics.Rect()
+        root.getBoundsInScreen(bounds)
+        // # 点击屏幕中间位置，收起键盘
+        bridge.dispatchTap(bounds.exactCenterX(), bounds.height() * 0.4f)
+        delay(800)
     }
 
     // ---- Node finding helpers ----
