@@ -11,3 +11,4 @@ created: 2026-04-01
 
 | ID | Name | Status | Owner | Link |
 |----|------|--------|-------|------|
+| F001 | Prioritized Location Test Plan | spec | @kimi | [F001](docs/features/F001-prioritized-location-test-plan.md) |

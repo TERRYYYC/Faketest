@@ -11,7 +11,7 @@ Assumption for this document: the repository tag `v0.1.0-mvp` dated 2026-04-04 i
 ## Project Identity
 
 - **Name**: CellRebelAuto
-- **One-liner**: Automates repeated CellRebel tests across randomized fake GPS locations.
+- **One-liner**: Executes prioritized fake-GPS location worklists and records verified CellRebel success quotas.
 - **Target user**: Android testers running repeated network-quality checks across spoofed locations on MIUI-class devices.
 - **Current status**: MVP tagged in the GitHub repository
 - **Distribution**: GitHub repository
@@ -100,12 +100,13 @@ The unplanned debug export work was justified. Without log export and accessibil
 
 ### Phase Goal
 
-Make the automation loop reproducible on the target MIUI device and trustworthy enough to compare location-based network test results.
+Make prioritized location worklists reproducible on the target MIUI device and trustworthy enough to compare location-based network test results.
 
 ### Will Do (committed)
 
 | Priority | Feature/Task | Success Criteria | Depends On |
 |----------|--------------|------------------|------------|
+| P0 | Execute F001 prioritized location plans | Lower numeric priorities run first, equal priorities preserve input order, and each location advances only after its verified CellRebel success quota is complete | CSV worklist import and persistent per-location progress |
 | P0 | Stabilize MIUI app switching | The full Fake GPS -> CellRebel -> return-to-self cycle succeeds in 20 consecutive runs on the target device | Access to the target device and its MIUI permission settings |
 | P0 | Verify the full end-to-end cycle with exported evidence | At least one CSV export contains 20 complete multi-cycle results with valid timestamps, coordinates, and scores | TD-1 mitigation |
 | P1 | Add regression coverage for core non-UI logic | A local test suite runs in CI or locally and covers config validation, result persistence, and score-record serialization | Basic test harness setup |
