@@ -19,5 +19,7 @@ data class RunSession(
     // # 配置快照（序列化字符串）
     val configSnapshot: String = "",
     // # 已完成的循环数
-    val totalCycles: Int = 0
+    val totalCycles: Int = 0,
+    // # 关联的位置计划（v3 新增，旧会话为 null）
+    val planId: Long? = null
 )
