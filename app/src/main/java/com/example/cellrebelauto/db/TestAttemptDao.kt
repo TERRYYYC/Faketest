@@ -4,6 +4,16 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import com.example.cellrebelauto.model.plan.TestAttempt
+import kotlinx.coroutines.flow.Flow
+
+/**
+ * Per-task attempt count projection for the Plan screen cards.
+ * # 每个任务的尝试总数投影（Plan 页卡片用）
+ */
+data class TaskAttemptCount(
+    val taskId: Long,
+    val count: Int
+)
 
 /**
  * DAO for test_attempts.
@@ -34,6 +44,14 @@ interface TestAttemptDao {
 
     @Query("SELECT COUNT(*) FROM test_attempts WHERE taskId = :taskId")
     suspend fun countAttemptsForTask(taskId: Long): Int
+
+    // # 观察某计划下每个任务的尝试总数（Plan 页卡片 Attempts n）
+    @Query(
+        "SELECT a.taskId AS taskId, COUNT(*) AS count FROM test_attempts a " +
+            "INNER JOIN location_tasks t ON a.taskId = t.id " +
+            "WHERE t.planId = :planId GROUP BY a.taskId"
+    )
+    fun observeAttemptCountsForPlan(planId: Long): Flow<List<TaskAttemptCount>>
 
     /**
      * Recovery sweep (INV-9): mark leftover starting/running rows interrupted.

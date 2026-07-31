@@ -2,10 +2,13 @@ package com.example.cellrebelauto.repository
 
 import androidx.room.withTransaction
 import com.example.cellrebelauto.db.AppDatabase
+import com.example.cellrebelauto.db.TaskAttemptCount
 import com.example.cellrebelauto.model.RunSession
 import com.example.cellrebelauto.model.plan.LocationPlan
 import com.example.cellrebelauto.model.plan.LocationTask
 import com.example.cellrebelauto.model.plan.TestAttempt
+import com.example.cellrebelauto.model.plan.WorklistRow
+import kotlinx.coroutines.flow.Flow
 
 /**
  * Plan-level repository (O1–O4 data owner). Wraps the plan/task/attempt/session
@@ -29,6 +32,53 @@ class PlanRepository(private val db: AppDatabase) {
     // # 最近一次终态尝试的 endedAt（缓冲投影，INV-5）
     suspend fun latestTerminalAttemptEndedAt(planId: Long): Long? =
         db.testAttemptDao().getLatestTerminalAttemptEndedAtForPlan(planId)
+
+    // ---- Plan screen reads (observable) ----
+
+    // # 观察最近导入的计划
+    fun observeLatestPlan(): Flow<LocationPlan?> = db.planDao().observeLatestPlan()
+
+    // # 观察某计划的任务列表（DAO 已按执行顺序排序，INV-1）
+    fun observeTasks(planId: Long): Flow<List<LocationTask>> =
+        db.locationTaskDao().observeTasksForPlan(planId)
+
+    // # 观察某计划每个任务的尝试总数
+    fun observeAttemptCounts(planId: Long): Flow<List<TaskAttemptCount>> =
+        db.testAttemptDao().observeAttemptCountsForPlan(planId)
+
+    // ---- Import (atomic, AC-A2) ----
+
+    /**
+     * Persists a validated worklist as plan + tasks in ONE transaction.
+     * Callers must run WorklistParser first and pass only Success rows;
+     * the unfinished-plan rejection is a UI/policy concern handled before this.
+     * # 将已校验的清单原子落库（计划行 + 全部任务行，同一事务）。
+     * # 调用方须先过 WorklistParser；未完成计划的拒绝策略在 UI 层处理
+     */
+    suspend fun importPlan(
+        sourceFileName: String,
+        globalBufferSeconds: Int,
+        rows: List<WorklistRow>,
+        importedAt: Long
+    ): Long = db.planDao().insertPlanWithTasks(
+        LocationPlan(
+            sourceFileName = sourceFileName,
+            importedAt = importedAt,
+            globalBufferSeconds = globalBufferSeconds,
+            totalRows = rows.size,
+            totalRequiredSuccesses = rows.sumOf { it.requiredSuccesses }
+        ),
+        rows.map {
+            LocationTask(
+                planId = 0, // # 由 insertPlanWithTasks 回填
+                csvRow = it.csvRow,
+                longitude = it.longitude,
+                latitude = it.latitude,
+                priority = it.priority,
+                requiredSuccesses = it.requiredSuccesses
+            )
+        }
+    )
 
     // ---- Recovery (INV-9 / O4) ----
 

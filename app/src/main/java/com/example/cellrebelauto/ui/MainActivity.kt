@@ -39,18 +39,41 @@ fun MainApp(vm: MainViewModel = viewModel()) {
     val logs by vm.logs.collectAsState()
     val results by vm.results.collectAsState()
     val isServiceConnected by vm.isServiceConnected.collectAsState()
+    val planState by vm.planUiState.collectAsState()
+    val planConfig by vm.planConfig.collectAsState()
+    val importErrors by vm.importErrors.collectAsState()
+    val importNotice by vm.importNotice.collectAsState()
 
     when (currentScreen) {
-        Screen.CONTROL -> {
+        Screen.PLAN -> {
+            PlanScreen(
+                planState = planState,
+                planConfig = planConfig,
+                isRunning = isRunning,
+                isServiceConnected = isServiceConnected,
+                importErrors = importErrors,
+                importNotice = importNotice,
+                onImport = { vm.importCsv(it) },
+                onSetGlobalBuffer = { vm.setGlobalBuffer(it) },
+                onSetTestTimeout = { vm.setTestTimeout(it) },
+                onSetGpsSettle = { vm.setGpsSettle(it) },
+                onStartOrResume = { vm.startOrResumePlan() },
+                onStop = { vm.stopAutomation() },
+                onOpenRun = { vm.navigateTo(Screen.RUN) },
+                onOpenHistory = { vm.navigateTo(Screen.HISTORY) }
+            )
+        }
+
+        Screen.RUN -> {
             ControlScreen(
                 isRunning = isRunning,
                 currentState = currentState,
                 cycleCount = cycleCount,
                 logs = logs,
                 isServiceConnected = isServiceConnected,
-                onStart = { vm.startAutomation() },
+                onStart = { vm.startOrResumePlan() },
                 onStop = { vm.stopAutomation() },
-                onOpenConfig = { vm.navigateTo(Screen.CONFIG) },
+                onOpenPlan = { vm.navigateTo(Screen.PLAN) },
                 onOpenHistory = { vm.navigateTo(Screen.HISTORY) },
                 // # 调试功能
                 onExportLogs = { vm.exportLogs() },
@@ -62,7 +85,7 @@ fun MainApp(vm: MainViewModel = viewModel()) {
             ConfigScreen(
                 currentConfig = config,
                 onSave = { vm.updateConfig(it) },
-                onBack = { vm.navigateTo(Screen.CONTROL) }
+                onBack = { vm.navigateTo(Screen.PLAN) }
             )
         }
 
@@ -70,7 +93,7 @@ fun MainApp(vm: MainViewModel = viewModel()) {
             HistoryScreen(
                 results = results,
                 onExportCsv = { vm.exportCsv() },
-                onBack = { vm.navigateTo(Screen.CONTROL) }
+                onBack = { vm.navigateTo(Screen.PLAN) }
             )
         }
     }

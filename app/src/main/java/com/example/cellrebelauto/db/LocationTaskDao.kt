@@ -3,6 +3,7 @@ package com.example.cellrebelauto.db
 import androidx.room.Dao
 import androidx.room.Query
 import com.example.cellrebelauto.model.plan.LocationTask
+import kotlinx.coroutines.flow.Flow
 
 /**
  * DAO for location_tasks.
@@ -14,6 +15,10 @@ interface LocationTaskDao {
     // # 执行顺序：priority ASC, csvRow ASC（INV-1）
     @Query("SELECT * FROM location_tasks WHERE planId = :planId ORDER BY priority ASC, csvRow ASC")
     suspend fun getTasksForPlan(planId: Long): List<LocationTask>
+
+    // # 观察某计划的任务列表（执行顺序），供 Plan 页卡片实时刷新
+    @Query("SELECT * FROM location_tasks WHERE planId = :planId ORDER BY priority ASC, csvRow ASC")
+    fun observeTasksForPlan(planId: Long): Flow<List<LocationTask>>
 
     @Query("SELECT * FROM location_tasks WHERE planId = :planId AND status = 'active' LIMIT 1")
     suspend fun getActiveTaskForPlan(planId: Long): LocationTask?

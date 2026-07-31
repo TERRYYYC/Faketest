@@ -50,7 +50,7 @@ fun ControlScreen(
     isServiceConnected: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
-    onOpenConfig: () -> Unit,
+    onOpenPlan: () -> Unit,
     onOpenHistory: () -> Unit,
     // # 调试功能回调
     onExportLogs: () -> Unit = {},
@@ -165,11 +165,11 @@ fun ControlScreen(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             OutlinedButton(
-                onClick = onOpenConfig,
+                onClick = onOpenPlan,
                 modifier = Modifier.weight(1f),
                 enabled = !isRunning
             ) {
-                Text("Config")
+                Text("Plan")
             }
             OutlinedButton(
                 onClick = onOpenHistory,

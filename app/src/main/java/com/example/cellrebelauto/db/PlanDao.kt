@@ -6,6 +6,7 @@ import androidx.room.Query
 import androidx.room.Transaction
 import com.example.cellrebelauto.model.plan.LocationPlan
 import com.example.cellrebelauto.model.plan.LocationTask
+import kotlinx.coroutines.flow.Flow
 
 /**
  * DAO for location_plans.
@@ -34,6 +35,10 @@ interface PlanDao {
     // # 获取最近导入的计划
     @Query("SELECT * FROM location_plans ORDER BY importedAt DESC LIMIT 1")
     suspend fun getLatestPlan(): LocationPlan?
+
+    // # 观察最近导入的计划（Plan 页实时刷新）
+    @Query("SELECT * FROM location_plans ORDER BY importedAt DESC LIMIT 1")
+    fun observeLatestPlan(): Flow<LocationPlan?>
 
     @Query("SELECT * FROM location_plans WHERE id = :planId")
     suspend fun getPlanById(planId: Long): LocationPlan?
