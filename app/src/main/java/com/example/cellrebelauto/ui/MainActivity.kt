@@ -43,6 +43,9 @@ fun MainApp(vm: MainViewModel = viewModel()) {
     val planConfig by vm.planConfig.collectAsState()
     val importErrors by vm.importErrors.collectAsState()
     val importNotice by vm.importNotice.collectAsState()
+    val currentTask by vm.currentTask.collectAsState()
+    val cooldown by vm.cooldown.collectAsState()
+    val lastFailure by vm.lastFailure.collectAsState()
 
     when (currentScreen) {
         Screen.PLAN -> {
@@ -69,9 +72,13 @@ fun MainApp(vm: MainViewModel = viewModel()) {
                 isRunning = isRunning,
                 currentState = currentState,
                 cycleCount = cycleCount,
+                currentTask = currentTask,
+                cooldown = cooldown,
+                lastFailure = lastFailure,
+                planCompletedSuccesses = planState.completedSuccesses,
+                planTotalSuccesses = planState.plan?.totalRequiredSuccesses ?: 0,
                 logs = logs,
                 isServiceConnected = isServiceConnected,
-                onStart = { vm.startOrResumePlan() },
                 onStop = { vm.stopAutomation() },
                 onOpenPlan = { vm.navigateTo(Screen.PLAN) },
                 onOpenHistory = { vm.navigateTo(Screen.HISTORY) },

@@ -16,6 +16,42 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
+ * Snapshot of the task currently being attempted (Run page status card).
+ * # 当前正在尝试的任务快照（Run 页状态卡）
+ */
+data class EngineTaskSnapshot(
+    val csvRow: Int,
+    val priority: Int,
+    val latitude: Double,
+    val longitude: Double,
+    val completedSuccesses: Int,
+    val requiredSuccesses: Int,
+    val attemptOrdinal: Int
+)
+
+/**
+ * Scheduler cooldown projection (Run page cooldown card). Emitted once when
+ * the buffer wait starts; the UI counts down locally from startedAtMs.
+ * # scheduler 缓冲倒计时投影：等待开始时发射一次，UI 基于 startedAtMs 本地倒数
+ */
+data class CooldownInfo(
+    val startedAtMs: Long,
+    val remainingMs: Long,
+    val totalMs: Long,
+    // # 倒计时结束后的去向：同点重试 / 前进下一点
+    val nextAction: String
+)
+
+/**
+ * Most recent failed attempt (Run page last-failure line, INV-10 visible).
+ * # 最近一次失败尝试（Run 页 last failure 行）
+ */
+data class LastFailureInfo(
+    val attemptOrdinal: Int,
+    val reason: String
+)
+
+/**
  * Plan-driven automation orchestrator (F001). Executes the imported location
  * worklist in deterministic order, counting only verified CellRebel successes
  * toward per-location quotas.
@@ -67,6 +103,18 @@ class AutomationEngine(
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs: StateFlow<List<String>> = _logs
 
+    // # 当前任务快照（Run 页状态卡）
+    private val _currentTask = MutableStateFlow<EngineTaskSnapshot?>(null)
+    val currentTask: StateFlow<EngineTaskSnapshot?> = _currentTask
+
+    // # scheduler 缓冲倒计时投影（Run 页 cooldown 卡）
+    private val _cooldown = MutableStateFlow<CooldownInfo?>(null)
+    val cooldown: StateFlow<CooldownInfo?> = _cooldown
+
+    // # 最近一次失败（Run 页 last failure 行）
+    private val _lastFailure = MutableStateFlow<LastFailureInfo?>(null)
+    val lastFailure: StateFlow<LastFailureInfo?> = _lastFailure
+
     private var runSessionId: Long = 0
     // # 在途尝试（停止/取消时标记 interrupted）
     private var currentAttemptId: Long? = null
@@ -103,8 +151,10 @@ class AutomationEngine(
                 val task = PlanScheduler.selectNext(tasks) ?: break
                 ensureActive()
 
+                // # 选中时是否为 pending（cooldown 卡的下一步去向据此投影）
+                val advancingToNewTask = task.status == "pending"
                 // # 新选中的 pending 任务 → active
-                if (task.status == "pending") {
+                if (advancingToNewTask) {
                     planRepository.markTaskActive(task.id)
                 }
                 log("--- Location csvRow=${task.csvRow} (${task.latitude},${task.longitude}) " +
@@ -114,9 +164,19 @@ class AutomationEngine(
                 val lastEndedAt = planRepository.latestTerminalAttemptEndedAt(planId)
                 val remainingMs = bufferGate.remainingMs(lastEndedAt)
                 if (remainingMs > 0) {
-                    updateState(AutomationState.WAITING_INTERVAL)
+                    updateState(AutomationState.COOLDOWN)
+                    _cooldown.value = CooldownInfo(
+                        startedAtMs = nowMs(),
+                        remainingMs = remainingMs,
+                        totalMs = bufferGate.bufferSeconds * 1000L,
+                        nextAction = if (advancingToNewTask)
+                            "advance to next location"
+                        else
+                            "retry same location"
+                    )
                     log("Buffer gate: waiting ${remainingMs / 1000}s before next attempt")
                     delayMs(remainingMs)
+                    _cooldown.value = null
                     ensureActive()
                 }
 
@@ -142,6 +202,15 @@ class AutomationEngine(
                 )
                 currentAttemptId = attemptId
                 _cycleCount.value = _cycleCount.value + 1
+                _currentTask.value = EngineTaskSnapshot(
+                    csvRow = task.csvRow,
+                    priority = task.priority,
+                    latitude = task.latitude,
+                    longitude = task.longitude,
+                    completedSuccesses = task.completedSuccesses,
+                    requiredSuccesses = task.requiredSuccesses,
+                    attemptOrdinal = attemptOrdinal
+                )
 
                 // # GPS 稳定等待
                 if (gpsSettleMs > 0) {
@@ -158,6 +227,8 @@ class AutomationEngine(
                 if (gpsOutcome is GpsOutcome.Failed) {
                     log("GPS failed: ${gpsOutcome.reason} — typed failed attempt, no quota consumed")
                     planRepository.finalizeAttemptFailure(attemptId, gpsOutcome.reason.name, nowMs())
+                    updateState(AutomationState.FAILED)
+                    _lastFailure.value = LastFailureInfo(attemptOrdinal, gpsOutcome.reason.name)
                     currentAttemptId = null
                     returnToSelf()
                     tasks = planRepository.getTasks(planId)
@@ -172,7 +243,7 @@ class AutomationEngine(
                 returnToSelf()
 
                 // ==================== Finalize ====================
-                updateState(AutomationState.COLLECTING_RESULT)
+                updateState(AutomationState.PROCESSING)
                 when (outcome) {
                     is AttemptOutcome.Success -> {
                         // # INV-3：单事务收尾（尝试行 + 守卫式自增）
@@ -189,15 +260,23 @@ class AutomationEngine(
                             log("WARNING: finalize skipped (stale expected count) — idempotent guard held")
                         }
                         val updated = planRepository.getTask(task.id)
-                        if (updated != null && PlanScheduler.isQuotaComplete(updated)) {
-                            planRepository.markTaskCompleted(task.id)
-                            log("Location csvRow=${task.csvRow} quota complete ✔")
+                        if (updated != null) {
+                            // # 刷新 Run 页状态卡上的成功计数
+                            _currentTask.value = _currentTask.value
+                                ?.copy(completedSuccesses = updated.completedSuccesses)
+                            if (PlanScheduler.isQuotaComplete(updated)) {
+                                planRepository.markTaskCompleted(task.id)
+                                log("Location csvRow=${task.csvRow} quota complete ✔")
+                            }
                         }
+                        updateState(AutomationState.SUCCEEDED)
                         log("Attempt $attemptOrdinal succeeded: Web=${outcome.webScore}, Video=${outcome.videoScore}")
                     }
                     is AttemptOutcome.Failure -> {
                         // # INV-4：失败持久化，不计入配额
                         planRepository.finalizeAttemptFailure(attemptId, outcome.reason.name, outcome.endedAt)
+                        updateState(AutomationState.FAILED)
+                        _lastFailure.value = LastFailureInfo(attemptOrdinal, outcome.reason.name)
                         log("Attempt $attemptOrdinal failed: ${outcome.reason} (${outcome.detail ?: "no detail"})")
                     }
                 }
@@ -212,6 +291,7 @@ class AutomationEngine(
 
         } catch (e: CancellationException) {
             // # 停止/取消：在途尝试标记 interrupted，会话 stopped
+            _cooldown.value = null
             currentAttemptId?.let { planRepository.markAttemptInterruptedIfNonTerminal(it, nowMs()) }
             updateState(AutomationState.IDLE)
             if (runSessionId != 0L) {

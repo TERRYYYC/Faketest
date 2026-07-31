@@ -71,6 +71,18 @@ class AutomationService : AccessibilityService() {
         private val _isServiceConnected = MutableStateFlow(false)
         val isServiceConnected: StateFlow<Boolean> = _isServiceConnected
 
+        // # 当前任务快照（Run 页状态卡）
+        private val _currentTask = MutableStateFlow<EngineTaskSnapshot?>(null)
+        val currentTask: StateFlow<EngineTaskSnapshot?> = _currentTask
+
+        // # scheduler 缓冲倒计时投影（Run 页 cooldown 卡）
+        private val _cooldown = MutableStateFlow<CooldownInfo?>(null)
+        val cooldown: StateFlow<CooldownInfo?> = _cooldown
+
+        // # 最近一次失败尝试（Run 页 last failure 行）
+        private val _lastFailure = MutableStateFlow<LastFailureInfo?>(null)
+        val lastFailure: StateFlow<LastFailureInfo?> = _lastFailure
+
         /**
          * Starts automation for the given plan.
          * # 启动指定位置计划的自动化
@@ -287,6 +299,16 @@ class AutomationService : AccessibilityService() {
             // # 收集日志
             launch {
                 newEngine.logs.collect { _logs.value = it }
+            }
+            // # 转发 Run 页所需的引擎投影流
+            launch {
+                newEngine.currentTask.collect { _currentTask.value = it }
+            }
+            launch {
+                newEngine.cooldown.collect { _cooldown.value = it }
+            }
+            launch {
+                newEngine.lastFailure.collect { _lastFailure.value = it }
             }
 
             // # 运行引擎（阻塞直到完成/取消/出错）

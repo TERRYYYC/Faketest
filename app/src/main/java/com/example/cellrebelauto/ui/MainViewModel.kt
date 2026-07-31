@@ -7,6 +7,9 @@ import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.cellrebelauto.automation.AutomationService
+import com.example.cellrebelauto.automation.CooldownInfo
+import com.example.cellrebelauto.automation.EngineTaskSnapshot
+import com.example.cellrebelauto.automation.LastFailureInfo
 import com.example.cellrebelauto.automation.plan.PlanScheduler
 import com.example.cellrebelauto.data.PlanConfigStore
 import com.example.cellrebelauto.db.AppDatabase
@@ -97,6 +100,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val cycleCount: StateFlow<Int> = AutomationService.cycleCount
     val logs: StateFlow<List<String>> = AutomationService.logs
     val isServiceConnected: StateFlow<Boolean> = AutomationService.isServiceConnected
+
+    // # Run 页投影流（Task 11）
+    val currentTask: StateFlow<EngineTaskSnapshot?> = AutomationService.currentTask
+    val cooldown: StateFlow<CooldownInfo?> = AutomationService.cooldown
+    val lastFailure: StateFlow<LastFailureInfo?> = AutomationService.lastFailure
 
     // ---- Plan config (O6, DataStore-persisted) ----
 
