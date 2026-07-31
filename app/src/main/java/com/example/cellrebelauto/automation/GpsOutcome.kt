@@ -17,6 +17,16 @@ sealed interface GpsOutcome {
 }
 
 /**
+ * Engine-facing seam for setting a fake GPS location.
+ * Implemented by FakeGpsHandler (device) and fakes (tests).
+ * # 面向引擎的设置伪造 GPS 位置的接缝：
+ * # 设备上由 FakeGpsHandler 实现，测试用假实现
+ */
+interface GpsLocationSetter {
+    suspend fun setLocation(lat: Double, lng: Double): GpsOutcome
+}
+
+/**
  * Pure activation check: presence of the "Stop Fake GPS" button is the
  * activation evidence.
  * # 纯激活判断："Stop Fake GPS" 按钮存在即激活证据

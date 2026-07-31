@@ -34,7 +34,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 class FakeGpsHandler(
     private val bridge: AccessibilityBridge,
     private val onLog: (String) -> Unit
-) {
+) : GpsLocationSetter {
     companion object {
         const val PACKAGE = "com.hopefactory2021.fakegpslocation"
         private const val TAG = "FakeGpsHandler"
@@ -57,7 +57,7 @@ class FakeGpsHandler(
      * @param lat Target latitude / 目标纬度
      * @param lng Target longitude / 目标经度
      */
-    suspend fun setLocation(lat: Double, lng: Double): GpsOutcome {
+    override suspend fun setLocation(lat: Double, lng: Double): GpsOutcome {
         // # 第 1 步：启动应用（前台切换失败 → FOREGROUND_SWITCH_FAILED）
         log("Launching Fake GPS...")
         try {

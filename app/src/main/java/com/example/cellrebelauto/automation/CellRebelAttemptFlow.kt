@@ -23,6 +23,16 @@ interface CellRebelDriver {
 }
 
 /**
+ * Engine-facing seam for running one verified CellRebel attempt.
+ * Implemented by CellRebelHandler (device) and fakes (tests).
+ * # 面向引擎的执行一次已验证 CellRebel 尝试的接缝：
+ * # 设备上由 CellRebelHandler 实现，测试用假实现
+ */
+interface CellRebelRunner {
+    suspend fun runTest(startedAt: Long, testTimeoutMs: Long): AttemptOutcome
+}
+
+/**
  * Verified CellRebel attempt lifecycle (AC-B2/B3/B5):
  *
  *   1. click Start (ACTION_CLICK)

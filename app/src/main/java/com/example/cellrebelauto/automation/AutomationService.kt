@@ -4,10 +4,11 @@ import android.accessibilityservice.AccessibilityService
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.example.cellrebelauto.automation.plan.BufferGate
+import com.example.cellrebelauto.data.PlanConfigStore
 import com.example.cellrebelauto.db.AppDatabase
-import com.example.cellrebelauto.model.AutoConfig
 import com.example.cellrebelauto.model.AutomationState
-import com.example.cellrebelauto.repository.TestRepository
+import com.example.cellrebelauto.repository.PlanRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -15,6 +16,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -70,11 +72,11 @@ class AutomationService : AccessibilityService() {
         val isServiceConnected: StateFlow<Boolean> = _isServiceConnected
 
         /**
-         * Starts automation with given config.
-         * # 使用给定配置启动自动化
+         * Starts automation for the given plan.
+         * # 启动指定位置计划的自动化
          */
-        fun startAutomation(config: AutoConfig) {
-            instance?.startWithConfig(config) ?: run {
+        fun startAutomation(planId: Long) {
+            instance?.startWithPlan(planId) ?: run {
                 Log.e(TAG, "Service not connected — cannot start")
             }
         }
@@ -233,38 +235,48 @@ class AutomationService : AccessibilityService() {
     // ---- Control ----
 
     /**
-     * Creates the engine, handlers, and starts the automation coroutine.
-     * # 创建引擎和处理器，启动自动化协程
+     * Creates the engine, handlers, and starts the plan-driven automation coroutine.
+     * # 创建引擎和处理器，启动计划驱动的自动化协程
      */
-    private fun startWithConfig(config: AutoConfig) {
+    private fun startWithPlan(planId: Long) {
         if (_isRunning.value) {
             addLog("Already running, ignoring start request")
             return
         }
-        if (!config.isGpsRangeValid() || !config.isTimingValid()) {
-            addLog("ERROR: Invalid configuration")
-            return
-        }
 
         val bridge = AccessibilityBridge(this)
-        val repository = TestRepository(AppDatabase.getInstance(applicationContext))
+        val db = AppDatabase.getInstance(applicationContext)
+        val planRepository = PlanRepository(db)
+        val configStore = PlanConfigStore(applicationContext)
 
         val cellRebelHandler = CellRebelHandler(bridge, onLog = { addLog(it) })
         val fakeGpsHandler = FakeGpsHandler(bridge) { addLog(it) }
 
-        val newEngine = AutomationEngine(
-            config = config,
-            repository = repository,
-            bridge = bridge,
-            cellRebelHandler = cellRebelHandler,
-            fakeGpsHandler = fakeGpsHandler
-        )
-        engine = newEngine
         _isRunning.value = true
 
-        // # 监听引擎状态并转发到 companion 的 StateFlow
         automationJob = serviceScope.launch {
-            // # 收集状态变化
+            // # 读取计划与高级配置（超时/GPS 稳定）
+            val plan = planRepository.getPlan(planId)
+            val planConfig = configStore.config.first()
+            if (plan == null) {
+                addLog("ERROR: plan #$planId not found")
+                _isRunning.value = false
+                return@launch
+            }
+
+            val newEngine = AutomationEngine(
+                planId = planId,
+                planRepository = planRepository,
+                cellRebelRunner = cellRebelHandler,
+                gpsSetter = fakeGpsHandler,
+                bufferGate = BufferGate(plan.globalBufferSeconds) { System.currentTimeMillis() },
+                testTimeoutMs = planConfig.testTimeoutSeconds * 1000L,
+                gpsSettleMs = planConfig.gpsSettleSeconds * 1000L,
+                bridge = bridge
+            )
+            engine = newEngine
+
+            // # 监听引擎状态并转发到 companion 的 StateFlow
             launch {
                 newEngine.state.collect { _currentState.value = it }
             }

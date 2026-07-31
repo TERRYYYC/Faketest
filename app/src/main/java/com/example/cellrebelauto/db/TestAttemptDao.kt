@@ -44,4 +44,39 @@ interface TestAttemptDao {
             "WHERE status IN ('starting', 'running')"
     )
     suspend fun markNonTerminalInterrupted(nowMs: Long): Int
+
+    /**
+     * Finalize a succeeded attempt (called inside the finalize transaction, INV-3).
+     * # 成功尝试收尾（在 finalize 事务内调用）
+     */
+    @Query(
+        "UPDATE test_attempts SET status = 'succeeded', successOrdinal = :successOrdinal, " +
+            "runningObservedAt = :runningObservedAt, endedAt = :endedAt, " +
+            "webBrowsingScore = :webScore, videoStreamingScore = :videoScore WHERE id = :attemptId"
+    )
+    suspend fun markSucceeded(
+        attemptId: Long,
+        successOrdinal: Int,
+        runningObservedAt: Long?,
+        endedAt: Long,
+        webScore: Double,
+        videoScore: Double
+    )
+
+    /**
+     * Finalize a failed attempt with a typed reason (INV-4/10).
+     * # 失败尝试收尾，带类型化原因
+     */
+    @Query("UPDATE test_attempts SET status = 'failed', failureReason = :reason, endedAt = :endedAt WHERE id = :attemptId")
+    suspend fun markFailed(attemptId: Long, reason: String, endedAt: Long)
+
+    /**
+     * Stop/cancel path: interrupt the in-flight attempt only if still non-terminal.
+     * # 停止/取消路径：仅当尝试仍为非终态时标记 interrupted
+     */
+    @Query(
+        "UPDATE test_attempts SET status = 'interrupted', failureReason = 'INTERRUPTED', endedAt = :nowMs " +
+            "WHERE id = :attemptId AND status IN ('starting', 'running')"
+    )
+    suspend fun markInterruptedIfNonTerminal(attemptId: Long, nowMs: Long)
 }

@@ -1,6 +1,7 @@
 package com.example.cellrebelauto.ui
 
 import android.app.Application
+import android.util.Log
 import android.widget.Toast
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -68,16 +69,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun startAutomation() {
-        val cfg = _config.value
-        if (!cfg.isGpsRangeValid() || !cfg.isTimingValid()) {
-            showToast("Please configure valid GPS range and timing first")
-            return
-        }
-        if (!isServiceConnected.value) {
-            showToast("Accessibility service not connected. Enable it in Settings.")
-            return
-        }
-        AutomationService.startAutomation(cfg)
+        // # F001 Task 9 临时桩：计划 UI 在 Task 10 落地后才会接入 planId
+        Log.i("MainViewModel", "plan UI lands in Task 10 — startAutomation not wired yet")
+        showToast("Plan UI lands in Task 10")
     }
 
     fun stopAutomation() {
