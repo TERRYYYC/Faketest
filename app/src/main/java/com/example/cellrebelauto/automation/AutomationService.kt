@@ -249,7 +249,7 @@ class AutomationService : AccessibilityService() {
         val bridge = AccessibilityBridge(this)
         val repository = TestRepository(AppDatabase.getInstance(applicationContext))
 
-        val cellRebelHandler = CellRebelHandler(bridge) { addLog(it) }
+        val cellRebelHandler = CellRebelHandler(bridge, onLog = { addLog(it) })
         val fakeGpsHandler = FakeGpsHandler(bridge) { addLog(it) }
 
         val newEngine = AutomationEngine(

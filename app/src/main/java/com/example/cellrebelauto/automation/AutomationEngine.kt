@@ -113,12 +113,18 @@ class AutomationEngine(
 
                 // ==================== Phase 3: Run CellRebel test ====================
                 updateState(AutomationState.LAUNCHING_CELLREBEL)
-                var testScores: CellRebelHandler.TestScores? = null
+                var testScores: Pair<Double, Double>? = null
 
                 val testSuccess = retryWithFallback("Run CellRebel test") {
-                    testScores = cellRebelHandler.runTest(
-                        collectDelayMs = config.collectDelaySeconds * 1000L
+                    // # F001 Task 7 临时适配：新 runTest 返回类型化结果，
+                    // # Task 9 会用计划循环整体重写此处
+                    val outcome = cellRebelHandler.runTest(
+                        startedAt = System.currentTimeMillis(),
+                        testTimeoutMs = config.collectDelaySeconds * 1000L
                     )
+                    if (outcome is AttemptOutcome.Success) {
+                        testScores = outcome.webScore to outcome.videoScore
+                    }
                 }
 
                 ensureActive()
@@ -131,8 +137,8 @@ class AutomationEngine(
                 val result = TestResult(
                     runSessionId = runSessionId,
                     timestamp = System.currentTimeMillis(),
-                    webBrowsingScore = testScores?.webBrowsingScore ?: -1.0,
-                    videoStreamingScore = testScores?.videoStreamingScore ?: -1.0,
+                    webBrowsingScore = testScores?.first ?: -1.0,
+                    videoStreamingScore = testScores?.second ?: -1.0,
                     latitude = lat,
                     longitude = lng,
                     cycleIndex = cycleIndex,
