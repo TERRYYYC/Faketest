@@ -198,7 +198,7 @@ Plan status must be a projection: completed when all task quotas are complete, r
 
 | # | 问题 | 分类 | 状态 |
 |---|------|------|------|
-| OQ-1 | What default global buffer and test timeout should ship? Both remain configurable and semantically separate. | value | ⬜ operator sample/config pending |
+| OQ-1 | What internal default test timeout should ship? The global buffer has no default: it is required on first use and then persisted; both settings remain semantically separate. | technical | ⬜ verify during implementation |
 | OQ-2 | Which exact accessibility nodes expose running and Start-enabled state on the target CellRebel build? | technical | ⬜ verify from tree dumps |
 | OQ-3 | Does the eventual operator list arrive as CSV or require another source adapter? | value | ⬜ CSV is current reversible default |
 
@@ -212,6 +212,7 @@ Plan status must be a projection: completed when all task quotas are complete, r
 | KD-4 | Completed result screen is the current business evidence of one successful CellRebel upload | Operator identified the first screenshot as completed and the second as running | 2026-07-30 |
 | KD-5 | Freshness is proven by a running transition, not changed score values | Running screenshot retains prior score values; legitimate consecutive scores may also be identical | 2026-07-30 |
 | KD-6 | Extend the sequential coroutine engine instead of rewriting it as a generic state machine | Keeps the product's existing validated orchestration boundary and avoids unrelated architecture scope | 2026-07-30 |
+| KD-7 | Use the approved Plan → Run → History journey; require the global buffer on first use and persist it without inventing a default | Operator approved the Design Gate v2.1 journey and buffer behavior | 2026-07-31 |
 
 ## Tips Contribution（F244）
 
@@ -222,10 +223,11 @@ Plan status must be a projection: completed when all task quotas are complete, r
 | 日期 | 事件 |
 |------|------|
 | 2026-07-30 | Operator clarified prioritized worklist, quota, global buffer, and screen-state semantics; F001 kicked off |
+| 2026-07-31 | Operator approved Design Gate v2.1: Plan → Run → History, with the global buffer required on first use and persisted |
 
 ## Review Gate
 
-- Design: @kimi returns the in-context Compose wireframe before UI implementation; @codex-sol checks requirement coverage, then operator confirms the visible journey.
+- Design: **passed** — @kimi's v2.1 wireframe was reviewed by @codex-sol and approved by the operator in message `0001785537089616-000460-086cdf15`.
 - Implementation: @kimi uses an isolated worktree and TDD; no feature code is written directly on `main`.
 - Code review: @codex-sol reviews but does not author the implementation.
 - Acceptance: target-device evidence is required; emulator/unit tests alone cannot satisfy Phase C.
@@ -237,3 +239,4 @@ Plan status must be a projection: completed when all task quotas are complete, r
 | Roadmap | `docs/ROADMAP.md` | Reliability milestone |
 | Handoff | `HANDOFF.md` | Existing MIUI and third-party app behavior |
 | Discussion | `feature-discussions/2026-07-30-f001-prioritized-location-plan/README.md` | Operator requirements and screen-state evidence |
+| Design Gate | `feature-discussions/2026-07-30-f001-design/README.md` | Approved in-context UI journey and AC/INV mapping |
