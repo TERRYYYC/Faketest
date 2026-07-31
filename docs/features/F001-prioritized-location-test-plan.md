@@ -8,7 +8,7 @@ created: 2026-07-30
 
 # F001: Prioritized Location Test Plan
 
-> **Status**: spec | **Owner**: @kimi | **Reviewer**: @codex-sol | **Priority**: P0
+> **Status**: in-progress | **Owner**: @kimi | **Reviewer**: @codex-sol | **Priority**: P0
 
 ## Why
 
