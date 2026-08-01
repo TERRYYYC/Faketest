@@ -3,9 +3,13 @@ package com.example.cellrebelauto.ui
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.cellrebelauto.ui.theme.CellRebelAutoTheme
 
@@ -46,7 +50,10 @@ fun MainApp(vm: MainViewModel = viewModel()) {
     val cooldown by vm.cooldown.collectAsState()
     val lastFailure by vm.lastFailure.collectAsState()
 
-    when (currentScreen) {
+    // # targetSdk 35 强制 edge-to-edge：统一处理状态栏/导航栏 insets，
+    // # 否则标题绘制在状态栏下、右上角服务指示被裁切
+    Box(modifier = Modifier.fillMaxSize().safeDrawingPadding()) {
+        when (currentScreen) {
         Screen.PLAN -> {
             PlanScreen(
                 planState = planState,
@@ -94,5 +101,6 @@ fun MainApp(vm: MainViewModel = viewModel()) {
                 onBack = { vm.navigateTo(Screen.PLAN) }
             )
         }
+    }
     }
 }
