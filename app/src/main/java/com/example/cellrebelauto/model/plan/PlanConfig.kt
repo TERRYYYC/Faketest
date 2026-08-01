@@ -11,5 +11,9 @@ data class PlanConfig(
     // # 单次 CellRebel 测试超时秒数（高级设置，内部默认）
     val testTimeoutSeconds: Int = 90,
     // # Fake GPS 落点后的稳定等待秒数（高级设置）
-    val gpsSettleSeconds: Int = 60
+    val gpsSettleSeconds: Int = 60,
+    // # F003：位置阶段开关（Fake GPS 落点+激活验证+稳定等待），默认开
+    val locationStageEnabled: Boolean = true,
+    // # F003：CellRebel 测试阶段开关，默认开
+    val testStageEnabled: Boolean = true
 )
