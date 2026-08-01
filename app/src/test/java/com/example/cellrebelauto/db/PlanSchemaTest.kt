@@ -71,6 +71,25 @@ class PlanSchemaTest {
     )
 
     @Test
+    fun `legacy results are readable for history and export`() = runTest {
+        // # C1 回归：v2 遗留 test_results 行必须能从 repository 读到（History + 导出）
+        val repo = com.example.cellrebelauto.repository.PlanRepository(db)
+        val sessionId = seedSession()
+        db.testResultDao().insert(
+            com.example.cellrebelauto.model.TestResult(
+                runSessionId = sessionId, timestamp = 1500L,
+                webBrowsingScore = 8.5, videoStreamingScore = 7.5,
+                latitude = 39.9, longitude = 116.4, cycleIndex = 1, status = "ok"
+            )
+        )
+
+        val legacy = repo.getLegacyResultsForExport()
+        assertEquals(1, legacy.size)
+        assertEquals(8.5, legacy[0].webBrowsingScore, 0.001)
+        assertEquals(sessionId, legacy[0].runSessionId)
+    }
+
+    @Test
     fun `buffer sync updates unstarted plan snapshot and refuses once started`() = runTest {
         // # F6 回归：UI 改 buffer 必须同步 engine 执行的 plan 快照（计划未启动），
         // # 计划一旦启动则拒绝（next-plan-only），二者绝不发散

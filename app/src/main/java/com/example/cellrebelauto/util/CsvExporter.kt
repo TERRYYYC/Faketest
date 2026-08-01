@@ -20,11 +20,14 @@ class CsvExporter(private val context: Context) {
     private val fileNameFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
 
     /**
-     * Exports attempt rows to the 15-column audit CSV (AC-C3). Returns the
-     * file name. Mapping logic lives in AttemptCsvMapper (pure, unit-tested).
-     * # 导出尝试行为 15 列审计 CSV，返回文件名；映射逻辑在 AttemptCsvMapper
+     * Exports attempt rows (plus legacy v2 rows, appended after) to the
+     * 15-column audit CSV (AC-C3, C1). Returns the file name.
+     * # 导出尝试行 + v2 遗留行（排在其后）为 15 列审计 CSV，返回文件名
      */
-    fun exportAttempts(attempts: List<AttemptWithTask>): String {
+    fun exportAttempts(
+        attempts: List<AttemptWithTask>,
+        legacyResults: List<com.example.cellrebelauto.model.TestResult> = emptyList()
+    ): String {
         val fileName = "cellrebel_attempts_${fileNameFormat.format(Date())}.csv"
         val stream = createOutputStream(fileName)
             ?: throw IllegalStateException("Cannot create output file")
@@ -33,7 +36,7 @@ class CsvExporter(private val context: Context) {
             val writer = out.bufferedWriter()
             writer.write(AttemptCsvMapper.HEADER.joinToString(","))
             writer.newLine()
-            for (row in AttemptCsvMapper.toCsvRows(attempts)) {
+            for (row in AttemptCsvMapper.toCsvRows(attempts, legacyResults)) {
                 writer.write(row.joinToString(","))
                 writer.newLine()
             }

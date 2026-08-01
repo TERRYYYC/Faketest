@@ -105,4 +105,42 @@ class AttemptCsvMapperTest {
         val row = AttemptCsvMapper.toCsvRows(listOf(failureItem()))[0]
         assertEquals("", row[10])
     }
+
+    private fun legacyResult() = com.example.cellrebelauto.model.TestResult(
+        id = 1, runSessionId = 42, timestamp = 1_753_800_000_000L,
+        webBrowsingScore = 8.5, videoStreamingScore = 7.5,
+        latitude = 39.9, longitude = 116.4, cycleIndex = 1, status = "ok"
+    )
+
+    @Test
+    fun `legacy result maps with real values and blank plan fields`() {
+        // # C1：v2 遗留行并入同一份 15 列 CSV——真实值按映射，计划字段留空
+        val row = AttemptCsvMapper.legacyToCsvRow(legacyResult())
+        assertEquals(AttemptCsvMapper.HEADER.size, row.size)
+        assertEquals("", row[0])               // plan_row 空
+        assertEquals("", row[1])               // csv_row 空
+        assertEquals("", row[2])               // priority 空
+        assertEquals("116.4", row[3])          // longitude 真实值
+        assertEquals("39.9", row[4])           // latitude 真实值
+        assertEquals("", row[5])               // success_ordinal 空
+        assertEquals("", row[6])               // attempt_ordinal 空
+        assertEquals("ok", row[7])             // status 真实值
+        assertEquals("", row[8])               // failure_reason 空
+        assertEquals(fmt(1_753_800_000_000L), row[9])  // started_at = legacy timestamp
+        assertEquals("", row[10])              // running_observed_at 空
+        assertEquals("", row[11])              // ended_at 空
+        assertEquals("8.5", row[12])           // web_score 真实值
+        assertEquals("7.5", row[13])           // video_score 真实值
+        assertEquals("42", row[14])            // session_id = runSessionId
+    }
+
+    @Test
+    fun `legacy rows are appended after attempt rows`() {
+        // # C1：legacy 行排在 attempt 行之后
+        val rows = AttemptCsvMapper.toCsvRows(listOf(successItem()), listOf(legacyResult()))
+        assertEquals(2, rows.size)
+        assertEquals("succeeded", rows[0][7])
+        assertEquals("ok", rows[1][7])
+        assertEquals("", rows[1][0])
+    }
 }

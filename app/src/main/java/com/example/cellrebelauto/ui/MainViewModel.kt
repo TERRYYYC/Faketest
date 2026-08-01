@@ -141,6 +141,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val attempts: StateFlow<List<AttemptWithTask>> = planRepository.observeAttemptsWithTasks()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
+    // # History 页 Legacy 分区：v2 遗留结果（C1，迁移故意保留的数据不静默消失）
+    val legacyResults: StateFlow<List<com.example.cellrebelauto.model.TestResult>> =
+        planRepository.observeLegacyResults()
+            .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+
     // ---- Actions ----
 
     fun navigateTo(screen: Screen) {
@@ -272,13 +277,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val allAttempts = withContext(Dispatchers.IO) {
                     planRepository.getAllAttemptsWithTasks()
                 }
-                if (allAttempts.isEmpty()) {
+                // # C1：v2 遗留行并入同一份导出（排在 attempt 行之后）
+                val legacy = withContext(Dispatchers.IO) {
+                    planRepository.getLegacyResultsForExport()
+                }
+                if (allAttempts.isEmpty() && legacy.isEmpty()) {
                     showToast("No attempts to export")
                     return@launch
                 }
                 val exporter = CsvExporter(getApplication())
                 val fileName = withContext(Dispatchers.IO) {
-                    exporter.exportAttempts(allAttempts)
+                    exporter.exportAttempts(allAttempts, legacy)
                 }
                 showToast("Exported: $fileName")
             } catch (e: Exception) {

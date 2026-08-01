@@ -38,6 +38,7 @@ import java.util.Locale
 @Composable
 fun HistoryScreen(
     attempts: List<AttemptWithTask>,
+    legacyResults: List<com.example.cellrebelauto.model.TestResult>,
     onExportCsv: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -62,7 +63,7 @@ fun HistoryScreen(
             OutlinedButton(onClick = onBack) { Text("Back") }
             Button(
                 onClick = onExportCsv,
-                enabled = attempts.isNotEmpty()
+                enabled = attempts.isNotEmpty() || legacyResults.isNotEmpty()
             ) { Text("Export CSV") }
         }
 
@@ -73,6 +74,57 @@ fun HistoryScreen(
             items(attempts, key = { it.attempt.id }) { item ->
                 AttemptCard(item)
             }
+
+            // # C1：v2 遗留结果分区（迁移故意保留的数据，与 attempt 卡片视觉区分）
+            if (legacyResults.isNotEmpty()) {
+                item(key = "legacy-header") {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "Legacy results (pre-plan)",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.Gray
+                    )
+                }
+                items(legacyResults, key = { "legacy-${it.id}" }) { result ->
+                    LegacyResultCard(result)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * One legacy v2 result row: timestamp, coords, scores, status — plain style,
+ * visually distinct from attempt cards.
+ * # v2 遗留结果卡片：时间、坐标、分数、状态；样式从简，与尝试卡片区分
+ */
+@Composable
+private fun LegacyResultCard(result: com.example.cellrebelauto.model.TestResult) {
+    val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(
+                "%.4f, %.4f · ${result.status}".format(result.longitude, result.latitude),
+                fontWeight = FontWeight.Bold,
+                fontSize = 13.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                dateFormat.format(Date(result.timestamp)) + " · session ${result.runSessionId}",
+                fontSize = 12.sp,
+                color = Color.Gray
+            )
+            Text(
+                "Web %.2f · Video %.2f".format(result.webBrowsingScore, result.videoStreamingScore),
+                fontSize = 13.sp
+            )
         }
     }
 }

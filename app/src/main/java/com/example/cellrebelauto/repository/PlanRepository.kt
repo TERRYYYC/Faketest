@@ -52,6 +52,18 @@ class PlanRepository(private val db: AppDatabase) {
     // ---- History / export (AC-C3, INV-8) ----
 
     /**
+     * Legacy v2 test_results rows for export (C1). The migration deliberately
+     * keeps them; they must not silently vanish from operator surfaces.
+     * # v2 遗留 test_results 行（导出用，C1）：迁移故意保留，不得静默消失
+     */
+    suspend fun getLegacyResultsForExport(): List<com.example.cellrebelauto.model.TestResult> =
+        db.testResultDao().getAllResultsForExport()
+
+    // # v2 遗留行（History 页分区展示，C1）
+    fun observeLegacyResults(): Flow<List<com.example.cellrebelauto.model.TestResult>> =
+        db.testResultDao().getAllResults()
+
+    /**
      * All attempts joined with task plan context, chronological (export).
      * # 全量尝试联接任务计划上下文，按时间升序（导出用）
      */

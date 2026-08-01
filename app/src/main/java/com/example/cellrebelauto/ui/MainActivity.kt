@@ -41,6 +41,7 @@ fun MainApp(vm: MainViewModel = viewModel()) {
     val cycleCount by vm.cycleCount.collectAsState()
     val logs by vm.logs.collectAsState()
     val attempts by vm.attempts.collectAsState()
+    val legacyResults by vm.legacyResults.collectAsState()
     val isServiceConnected by vm.isServiceConnected.collectAsState()
     val planState by vm.planUiState.collectAsState()
     val planConfig by vm.planConfig.collectAsState()
@@ -97,6 +98,7 @@ fun MainApp(vm: MainViewModel = viewModel()) {
         Screen.HISTORY -> {
             HistoryScreen(
                 attempts = attempts,
+                legacyResults = legacyResults,
                 onExportCsv = { vm.exportCsv() },
                 onBack = { vm.navigateTo(Screen.PLAN) }
             )

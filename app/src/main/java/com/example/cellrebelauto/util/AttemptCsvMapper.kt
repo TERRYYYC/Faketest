@@ -1,5 +1,6 @@
 package com.example.cellrebelauto.util
 
+import com.example.cellrebelauto.model.TestResult
 import com.example.cellrebelauto.model.plan.AttemptWithTask
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -31,9 +32,13 @@ object AttemptCsvMapper {
 
     /**
      * Maps attempts to CSV rows in the same column order as [HEADER].
-     * # 将尝试映射为与表头同列序的 CSV 行
+     * Legacy v2 rows (C1) are appended AFTER attempt rows, plan fields blank.
+     * # 将尝试映射为与表头同列序的 CSV 行；v2 遗留行排在其后（C1）
      */
-    fun toCsvRows(attempts: List<AttemptWithTask>): List<List<String>> =
+    fun toCsvRows(
+        attempts: List<AttemptWithTask>,
+        legacyResults: List<TestResult> = emptyList()
+    ): List<List<String>> =
         attempts.map { item ->
             val a = item.attempt
             listOf(
@@ -53,7 +58,33 @@ object AttemptCsvMapper {
                 a.videoStreamingScore?.toString() ?: "",
                 a.runSessionId.toString()
             )
-        }
+        } + legacyResults.map { legacyToCsvRow(it) }
+
+    /**
+     * Maps one legacy v2 test_results row into the 15-column audit shape (C1):
+     * real values for coords/status/scores/session, started_at = legacy
+     * timestamp, every plan-era field blank.
+     * # v2 遗留行 → 15 列审计结构：坐标/状态/分数/会话填真实值，
+     * # started_at = 遗留时间戳，计划时代字段一律留空
+     */
+    fun legacyToCsvRow(result: TestResult): List<String> =
+        listOf(
+            "",                                   // plan_row
+            "",                                   // csv_row
+            "",                                   // priority
+            result.longitude.toString(),
+            result.latitude.toString(),
+            "",                                   // success_ordinal
+            "",                                   // attempt_ordinal
+            result.status,
+            "",                                   // failure_reason
+            formatTs(result.timestamp),           // started_at = legacy timestamp
+            "",                                   // running_observed_at
+            "",                                   // ended_at
+            result.webBrowsingScore.toString(),
+            result.videoStreamingScore.toString(),
+            result.runSessionId.toString()
+        )
 
     private fun formatTs(epochMs: Long): String = timestampFormat.format(Date(epochMs))
 }
