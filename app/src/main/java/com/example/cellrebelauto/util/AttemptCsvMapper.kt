@@ -20,12 +20,12 @@ import java.util.Locale
  */
 object AttemptCsvMapper {
 
-    // # 审计导出表头（设计稿 v2.1 §1.3）
+    // # 审计导出表头（设计稿 v2.1 §1.3 + F003 追加 stage_notes）
     val HEADER: List<String> = listOf(
         "plan_row", "csv_row", "priority", "longitude", "latitude",
         "success_ordinal", "attempt_ordinal", "status", "failure_reason",
         "started_at", "running_observed_at", "ended_at",
-        "web_score", "video_score", "session_id"
+        "web_score", "video_score", "session_id", "stage_notes"
     )
 
     private val timestampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
@@ -56,7 +56,8 @@ object AttemptCsvMapper {
                 a.endedAt?.let { formatTs(it) } ?: "",
                 a.webBrowsingScore?.toString() ?: "",
                 a.videoStreamingScore?.toString() ?: "",
-                a.runSessionId.toString()
+                a.runSessionId.toString(),
+                a.stageNotes ?: "" // # F003 INV-F3-1：跳过标记随审计导出
             )
         } + legacyResults.map { legacyToCsvRow(it) }
 
@@ -83,7 +84,8 @@ object AttemptCsvMapper {
             "",                                   // ended_at
             result.webBrowsingScore.toString(),
             result.videoStreamingScore.toString(),
-            result.runSessionId.toString()
+            result.runSessionId.toString(),
+            ""                                    // stage_notes（遗留行无跳过）
         )
 
     private fun formatTs(epochMs: Long): String = timestampFormat.format(Date(epochMs))

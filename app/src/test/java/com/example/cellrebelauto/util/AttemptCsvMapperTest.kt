@@ -47,16 +47,47 @@ class AttemptCsvMapperTest {
     )
 
     @Test
-    fun `header is exactly the 15 audit columns in order`() {
+    fun `header is exactly the 16 audit columns in order`() {
+        // # F003：stage_notes 为第 16 列（追加在末尾）
         assertEquals(
             listOf(
                 "plan_row", "csv_row", "priority", "longitude", "latitude",
                 "success_ordinal", "attempt_ordinal", "status", "failure_reason",
                 "started_at", "running_observed_at", "ended_at",
-                "web_score", "video_score", "session_id"
+                "web_score", "video_score", "session_id", "stage_notes"
             ),
             AttemptCsvMapper.HEADER
         )
+    }
+
+    @Test
+    fun `attempt row carries stage notes in the trailing column`() {
+        // # F003 INV-F3-1：跳过标记随审计行导出；无跳过为空
+        val skipped = successItem().copy(
+            attempt = successItem().attempt.copy(stageNotes = "gps_skipped")
+        )
+        val rows = AttemptCsvMapper.toCsvRows(listOf(skipped, successItem()))
+        assertEquals(16, rows[0].size)
+        assertEquals("gps_skipped", rows[0][15])
+        assertEquals("", rows[1][15])
+    }
+
+    @Test
+    fun `ok_gps_only status exports verbatim with test_skipped note`() {
+        // # F003 KD-F3-2：GPS-only 终态原样导出
+        val gpsOnly = successItem().copy(
+            attempt = successItem().attempt.copy(
+                status = "ok_gps_only",
+                webBrowsingScore = null,
+                videoStreamingScore = null,
+                stageNotes = "test_skipped"
+            )
+        )
+        val row = AttemptCsvMapper.toCsvRows(listOf(gpsOnly))[0]
+        assertEquals("ok_gps_only", row[7])
+        assertEquals("", row[12])
+        assertEquals("", row[13])
+        assertEquals("test_skipped", row[15])
     }
 
     @Test
@@ -132,6 +163,7 @@ class AttemptCsvMapperTest {
         assertEquals("8.5", row[12])           // web_score 真实值
         assertEquals("7.5", row[13])           // video_score 真实值
         assertEquals("42", row[14])            // session_id = runSessionId
+        assertEquals("", row[15])              // stage_notes 空（F003，遗留行无跳过）
     }
 
     @Test
