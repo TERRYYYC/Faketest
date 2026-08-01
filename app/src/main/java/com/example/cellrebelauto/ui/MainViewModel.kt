@@ -158,6 +158,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
      * # 启动/恢复最近计划：引擎启动即做恢复清扫，两者同一条路径
      */
     fun startOrResumePlan() {
+        // # F003 AC-F3-4：双关 = 无操作流水线（KD-F3-3 配置错误），明确拒绝
+        val cfg = planConfig.value
+        if (!cfg.locationStageEnabled && !cfg.testStageEnabled) {
+            _importNotice.value =
+                "Both stages are OFF — nothing would run. Enable Location and/or CellRebel test stage first."
+            return
+        }
         val plan = planUiState.value.plan ?: return
         AutomationService.startAutomation(plan.id)
         _currentScreen.value = Screen.RUN
@@ -189,6 +196,16 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setGpsSettle(seconds: Int) {
         viewModelScope.launch { planConfigStore.setGpsSettleSeconds(seconds) }
+    }
+
+    // # F003：位置阶段开关（运行时偏好，下个 attempt 生效）
+    fun setLocationStageEnabled(enabled: Boolean) {
+        viewModelScope.launch { planConfigStore.setLocationStageEnabled(enabled) }
+    }
+
+    // # F003：CellRebel 测试阶段开关（运行时偏好，下个 attempt 生效）
+    fun setTestStageEnabled(enabled: Boolean) {
+        viewModelScope.launch { planConfigStore.setTestStageEnabled(enabled) }
     }
 
     // ---- CSV import (atomic, AC-A2) ----
@@ -268,8 +285,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Exports all attempts to the 15-column audit CSV (AC-C3), chronological.
-     * # 导出全部尝试为 15 列审计 CSV（时间升序）
+     * Exports all attempts to the 16-column audit CSV (AC-C3 + F003 stage_notes), chronological.
+     * # 导出全部尝试为 16 列审计 CSV（时间升序）
      */
     fun exportCsv() {
         viewModelScope.launch {

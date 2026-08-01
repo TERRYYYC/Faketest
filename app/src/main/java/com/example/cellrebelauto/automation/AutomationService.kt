@@ -8,6 +8,7 @@ import com.example.cellrebelauto.automation.plan.BufferGate
 import com.example.cellrebelauto.data.PlanConfigStore
 import com.example.cellrebelauto.db.AppDatabase
 import com.example.cellrebelauto.model.AutomationState
+import com.example.cellrebelauto.model.plan.StageToggles
 import com.example.cellrebelauto.repository.PlanRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -285,6 +286,11 @@ class AutomationService : AccessibilityService() {
                 bufferGate = BufferGate(plan.globalBufferSeconds) { System.currentTimeMillis() },
                 testTimeoutMs = planConfig.testTimeoutSeconds * 1000L,
                 gpsSettleMs = planConfig.gpsSettleSeconds * 1000L,
+                // # F003：每次 attempt 重新读取开关（AC-F3-5 中途切换下个 attempt 生效）
+                stageToggles = {
+                    val c = configStore.config.first()
+                    StageToggles(c.locationStageEnabled, c.testStageEnabled)
+                },
                 bridge = bridge
             )
             engine = newEngine

@@ -21,8 +21,8 @@ class CsvExporter(private val context: Context) {
 
     /**
      * Exports attempt rows (plus legacy v2 rows, appended after) to the
-     * 15-column audit CSV (AC-C3, C1). Returns the file name.
-     * # 导出尝试行 + v2 遗留行（排在其后）为 15 列审计 CSV，返回文件名
+     * 16-column audit CSV (AC-C3, C1, F003). Returns the file name.
+     * # 导出尝试行 + v2 遗留行（排在其后）为 16 列审计 CSV，返回文件名
      */
     fun exportAttempts(
         attempts: List<AttemptWithTask>,

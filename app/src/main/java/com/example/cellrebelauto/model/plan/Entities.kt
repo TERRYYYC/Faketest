@@ -7,8 +7,8 @@ import androidx.room.PrimaryKey
 import com.example.cellrebelauto.model.RunSession
 
 /**
- * Room entities for the prioritized location test plan (DB v3).
- * # 位置测试计划的 Room 实体（数据库版本 3）
+ * Room entities for the prioritized location test plan (DB v4, F003 stageNotes).
+ * # 位置测试计划的 Room 实体（数据库版本 4，F003 stageNotes）
  */
 
 /**
@@ -59,7 +59,7 @@ data class LocationTask(
 )
 
 /**
- * One CellRebel test attempt under a task. status: starting | running | succeeded | failed | interrupted.
+ * One CellRebel test attempt under a task. status: starting | running | succeeded | ok_gps_only | failed | interrupted.
  * # 某任务下的一次 CellRebel 测试尝试
  */
 @Entity(
@@ -96,5 +96,7 @@ data class TestAttempt(
     val webBrowsingScore: Double?,
     val videoStreamingScore: Double?,
     val latitude: Double,
-    val longitude: Double
+    val longitude: Double,
+    // # F003：阶段跳过审计标记（gps_skipped / test_skipped / null=无跳过）
+    val stageNotes: String? = null
 )

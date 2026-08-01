@@ -134,7 +134,7 @@ private fun AttemptCard(item: AttemptWithTask) {
     val a = item.attempt
     val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
     val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
-    val succeeded = a.status == "succeeded"
+    val succeeded = a.status == "succeeded" || a.status == "ok_gps_only"
 
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -159,7 +159,7 @@ private fun AttemptCard(item: AttemptWithTask) {
             if (a.successOrdinal != null) {
                 Text(
                     "success ${a.successOrdinal}/${item.requiredSuccesses} · " +
-                        "attempt ${a.attemptOrdinal} · ok",
+                        "attempt ${a.attemptOrdinal} · ${a.status}",
                     fontSize = 13.sp
                 )
             } else {
@@ -168,6 +168,15 @@ private fun AttemptCard(item: AttemptWithTask) {
                         (a.failureReason?.let { ": $it" } ?: ""),
                     fontSize = 13.sp,
                     color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            // # F003 INV-F3-1：阶段跳过标记（gps_skipped / test_skipped）
+            if (a.stageNotes != null) {
+                Text(
+                    "stage: ${a.stageNotes}",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.tertiary
                 )
             }
 

@@ -3,6 +3,7 @@ package com.example.cellrebelauto.data
 import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -30,13 +31,18 @@ class PlanConfigStore(
         val GLOBAL_BUFFER_SECONDS = intPreferencesKey("global_buffer_seconds")
         val TEST_TIMEOUT_SECONDS = intPreferencesKey("test_timeout_seconds")
         val GPS_SETTLE_SECONDS = intPreferencesKey("gps_settle_seconds")
+        // # F003：阶段开关（缺省 = 默认开）
+        val LOCATION_STAGE_ENABLED = booleanPreferencesKey("location_stage_enabled")
+        val TEST_STAGE_ENABLED = booleanPreferencesKey("test_stage_enabled")
     }
 
     val config: Flow<PlanConfig> = dataStore.data.map { prefs ->
         PlanConfig(
             globalBufferSeconds = prefs[Keys.GLOBAL_BUFFER_SECONDS],
             testTimeoutSeconds = prefs[Keys.TEST_TIMEOUT_SECONDS] ?: 90,
-            gpsSettleSeconds = prefs[Keys.GPS_SETTLE_SECONDS] ?: 60
+            gpsSettleSeconds = prefs[Keys.GPS_SETTLE_SECONDS] ?: 60,
+            locationStageEnabled = prefs[Keys.LOCATION_STAGE_ENABLED] ?: true,
+            testStageEnabled = prefs[Keys.TEST_STAGE_ENABLED] ?: true
         )
     }
 
@@ -50,5 +56,15 @@ class PlanConfigStore(
 
     suspend fun setGpsSettleSeconds(seconds: Int) {
         dataStore.edit { it[Keys.GPS_SETTLE_SECONDS] = seconds }
+    }
+
+    // # F003：位置阶段开关（运行时偏好，下个 attempt 生效）
+    suspend fun setLocationStageEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.LOCATION_STAGE_ENABLED] = enabled }
+    }
+
+    // # F003：CellRebel 测试阶段开关（运行时偏好，下个 attempt 生效）
+    suspend fun setTestStageEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.TEST_STAGE_ENABLED] = enabled }
     }
 }

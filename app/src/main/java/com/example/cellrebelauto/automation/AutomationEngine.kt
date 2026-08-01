@@ -4,6 +4,7 @@ import android.util.Log
 import com.example.cellrebelauto.automation.plan.BufferGate
 import com.example.cellrebelauto.automation.plan.PlanScheduler
 import com.example.cellrebelauto.model.AutomationState
+import com.example.cellrebelauto.model.plan.StageToggles
 import com.example.cellrebelauto.model.plan.TestAttempt
 import com.example.cellrebelauto.repository.PlanRepository
 import kotlinx.coroutines.CancellationException
@@ -62,8 +63,9 @@ data class LastFailureInfo(
  *   2. selectNext (active-unfinished first, then priority ASC / csvRow ASC)
  *   3. BufferGate wait from persisted last-terminal endedAt (INV-5, after
  *      BOTH success and failure)
- *   4. GPS settle, then Fake GPS setLocation — failure → typed failed attempt,
- *      NO quota consumed (INV-10)
+ *   4. Fake GPS setLocation (skippable, F003) — failure → typed failed attempt,
+ *      NO quota consumed (INV-10); GPS settle after confirmed activation (F3);
+ *      CellRebel stage OFF → ok_gps_only terminal counting quota (F003)
  *   5. runTest — Success finalized in ONE Room transaction (attempt row +
  *      guarded task increment, INV-3); Failure persisted with typed reason (INV-4)
  *   6. quota met → task completed; all complete → session completed
@@ -80,6 +82,8 @@ class AutomationEngine(
     private val bufferGate: BufferGate,
     private val testTimeoutMs: Long,
     private val gpsSettleMs: Long,
+    // # F003：阶段开关快照提供者，每次 attempt 重新读取（AC-F3-5）
+    private val stageToggles: suspend () -> StageToggles = { StageToggles() },
     // # 仅用于 returnToSelf（MIUI 中转）；测试不传
     private val bridge: AccessibilityBridge? = null,
     private val nowMs: () -> Long = { System.currentTimeMillis() },
@@ -127,7 +131,9 @@ class AutomationEngine(
      */
     suspend fun run() = coroutineScope {
         try {
-            // ==================== Step 1: recovery sweep FIRST (INV-9) ====================
+            // ==================== Step 0: recovery sweep FIRST (INV-9, F3R1-3) ====================
+            // # 清扫永远最先跑：即使随后 both-OFF guard 拒绝启动，
+            // # 崩溃残留也必须被终态化
             val sweptAttempts = planRepository.markNonTerminalInterrupted(nowMs())
             val sweptSessions = planRepository.markStaleSessionsInterrupted(nowMs())
             if (sweptAttempts > 0 || sweptSessions > 0) {
@@ -137,6 +143,15 @@ class AutomationEngine(
             val normalized = planRepository.normalizeQuotaCompletedTasks()
             if (normalized > 0) {
                 log("Recovery sweep: $normalized quota-full task(s) normalized to completed")
+            }
+
+            // ==================== Step 1: both-stages-off guard (AC-F3-4) ====================
+            // # 双关 = 配置错误（KD-F3-3）：明确拒绝，不创建会话
+            val initialToggles = stageToggles()
+            if (!initialToggles.locationStageEnabled && !initialToggles.testStageEnabled) {
+                log("ERROR: both stages are OFF — nothing would be executed. Enable at least one stage.")
+                updateState(AutomationState.ERROR)
+                return@coroutineScope
             }
 
             val plan = planRepository.getPlan(planId)
@@ -185,6 +200,23 @@ class AutomationEngine(
                     ensureActive()
                 }
 
+                // # F003：每次 attempt 重新读取开关快照（AC-F3-5 中途切换下个 attempt 生效）
+                val toggles = stageToggles()
+                // # F3R1-1：运行中双关 = 配置错误，fail-closed——不创建 attempt、
+                // # 不涨配额，session 以 error 终态收尾（AC-F3-4/KD-F3-3）
+                if (!toggles.locationStageEnabled && !toggles.testStageEnabled) {
+                    log("ERROR: both stages turned OFF mid-plan — failing closed, no new attempt")
+                    updateState(AutomationState.ERROR)
+                    planRepository.finishSession(runSessionId, "error", nowMs(), _cycleCount.value)
+                    return@coroutineScope
+                }
+                // # INV-F3-1：跳过必记录（双关已在启动时拒绝，至多一个标记）
+                val stageNotes = when {
+                    !toggles.locationStageEnabled -> "gps_skipped"
+                    !toggles.testStageEnabled -> "test_skipped"
+                    else -> null
+                }
+
                 // # 创建尝试行（starting），ordinal = 任务内计数 + 1
                 val startedAt = nowMs()
                 val attemptOrdinal = planRepository.countAttemptsForTask(task.id) + 1
@@ -202,7 +234,8 @@ class AutomationEngine(
                         webBrowsingScore = null,
                         videoStreamingScore = null,
                         latitude = task.latitude,
-                        longitude = task.longitude
+                        longitude = task.longitude,
+                        stageNotes = stageNotes
                     )
                 )
                 currentAttemptId = attemptId
@@ -217,28 +250,63 @@ class AutomationEngine(
                     attemptOrdinal = attemptOrdinal
                 )
 
-                // ==================== Fake GPS（失败即停，INV-10） ====================
-                updateState(AutomationState.LAUNCHING_FAKE_GPS)
-                val gpsOutcome = gpsSetter.setLocation(task.latitude, task.longitude)
-                ensureActive()
-                if (gpsOutcome is GpsOutcome.Failed) {
-                    log("GPS failed: ${gpsOutcome.reason} — typed failed attempt, no quota consumed")
-                    planRepository.finalizeAttemptFailure(attemptId, gpsOutcome.reason.name, nowMs())
-                    updateState(AutomationState.FAILED)
-                    _lastFailure.value = LastFailureInfo(attemptOrdinal, gpsOutcome.reason.name)
+                // ==================== Location stage（AC-F3-2：OFF 则整段跳过） ====================
+                if (toggles.locationStageEnabled) {
+                    // # Fake GPS（失败即停，INV-10）
+                    updateState(AutomationState.LAUNCHING_FAKE_GPS)
+                    val gpsOutcome = gpsSetter.setLocation(task.latitude, task.longitude)
+                    ensureActive()
+                    if (gpsOutcome is GpsOutcome.Failed) {
+                        log("GPS failed: ${gpsOutcome.reason} — typed failed attempt, no quota consumed")
+                        planRepository.finalizeAttemptFailure(attemptId, gpsOutcome.reason.name, nowMs())
+                        updateState(AutomationState.FAILED)
+                        _lastFailure.value = LastFailureInfo(attemptOrdinal, gpsOutcome.reason.name)
+                        currentAttemptId = null
+                        returnToSelf()
+                        tasks = planRepository.getTasks(planId)
+                        continue
+                    }
+
+                    // # GPS 稳定等待（F3）：锚在新坐标激活确认之后、CellRebel 启动之前，
+                    // # 旅程顺序 = Setting GPS → GPS settling → Testing
+                    if (gpsSettleMs > 0) {
+                        updateState(AutomationState.WAITING_INTERVAL)
+                        log("Waiting ${gpsSettleMs / 1000}s for GPS to settle...")
+                        delayMs(gpsSettleMs)
+                        ensureActive()
+                    }
+                } else {
+                    log("Location stage OFF — skipping Fake GPS entirely (gps_skipped)")
+                }
+
+                // ==================== Test stage OFF：GPS 验证即终态（AC-F3-3） ====================
+                if (!toggles.testStageEnabled) {
+                    // # KD-F3-2：ok_gps_only 计配额；同事务守卫式收尾（INV-3 语义不变）
+                    log("CellRebel stage OFF — GPS-verified attempt terminates as ok_gps_only")
+                    planRepository.finalizeAttemptSuccess(
+                        attemptId = attemptId,
+                        taskId = task.id,
+                        expectedCompletedSuccesses = task.completedSuccesses,
+                        runningObservedAt = null,
+                        endedAt = nowMs(),
+                        webScore = null,
+                        videoScore = null,
+                        status = "ok_gps_only"
+                    )
+                    val updated = planRepository.getTask(task.id)
+                    if (updated != null) {
+                        _currentTask.value = _currentTask.value
+                            ?.copy(completedSuccesses = updated.completedSuccesses)
+                        if (updated.status == "completed") {
+                            log("Location csvRow=${task.csvRow} quota complete ✔")
+                        }
+                    }
+                    updateState(AutomationState.SUCCEEDED)
+                    log("Attempt $attemptOrdinal ok_gps_only (test_skipped)")
                     currentAttemptId = null
                     returnToSelf()
                     tasks = planRepository.getTasks(planId)
                     continue
-                }
-
-                // # GPS 稳定等待（F3）：锚在新坐标激活确认之后、CellRebel 启动之前，
-                // # 旅程顺序 = Setting GPS → GPS settling → Testing
-                if (gpsSettleMs > 0) {
-                    updateState(AutomationState.WAITING_INTERVAL)
-                    log("Waiting ${gpsSettleMs / 1000}s for GPS to settle...")
-                    delayMs(gpsSettleMs)
-                    ensureActive()
                 }
 
                 // ==================== CellRebel verified attempt ====================

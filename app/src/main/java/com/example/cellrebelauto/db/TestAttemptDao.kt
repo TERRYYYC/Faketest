@@ -43,10 +43,12 @@ interface TestAttemptDao {
     )
     suspend fun getAttemptsForPlan(planId: Long): List<TestAttempt>
 
-    // # 最近一次终态尝试（succeeded/failed/interrupted）的 endedAt，用于缓冲投影（INV-5）
+    // # 最近一次终态尝试的 endedAt，用于缓冲投影（INV-5）。
+    // # F3R1-2：终态判定 = endedAt IS NOT NULL（对所有终态免疫，
+    // # 包括 ok_gps_only 与未来的新增终态），不再按 status 枚举
     @Query(
         "SELECT MAX(a.endedAt) FROM test_attempts a INNER JOIN location_tasks t ON a.taskId = t.id " +
-            "WHERE t.planId = :planId AND a.status IN ('succeeded', 'failed', 'interrupted')"
+            "WHERE t.planId = :planId AND a.endedAt IS NOT NULL"
     )
     suspend fun getLatestTerminalAttemptEndedAtForPlan(planId: Long): Long?
 
@@ -88,7 +90,7 @@ interface TestAttemptDao {
      * Finalize a succeeded attempt (called inside the finalize transaction, INV-3).
      * # 成功尝试收尾（在 finalize 事务内调用）
      */    @Query(
-        "UPDATE test_attempts SET status = 'succeeded', successOrdinal = :successOrdinal, " +
+        "UPDATE test_attempts SET status = :status, successOrdinal = :successOrdinal, " +
             "runningObservedAt = COALESCE(runningObservedAt, :runningObservedAt), endedAt = :endedAt, " +
             "webBrowsingScore = :webScore, videoStreamingScore = :videoScore WHERE id = :attemptId"
     )
@@ -97,8 +99,9 @@ interface TestAttemptDao {
         successOrdinal: Int,
         runningObservedAt: Long?,
         endedAt: Long,
-        webScore: Double,
-        videoScore: Double
+        webScore: Double?,
+        videoScore: Double?,
+        status: String = "succeeded"
     )
 
     /**

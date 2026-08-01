@@ -94,4 +94,47 @@ class PlanConfigStoreTest {
         assertEquals(45, config.testTimeoutSeconds)
         assertEquals(60, config.gpsSettleSeconds)
     }
+
+    @Test
+    fun `stage toggles default to ON`() = runTest {
+        // # F003 AC-F3-1：两个开关默认都开
+        val config = newStore(backgroundScope).config.first()
+        assertEquals(true, config.locationStageEnabled)
+        assertEquals(true, config.testStageEnabled)
+    }
+
+    @Test
+    fun `stage toggles are independently writable`() = runTest {
+        // # F003 AC-F3-1：两个开关互不影响
+        val store = newStore(backgroundScope)
+        store.setLocationStageEnabled(false)
+        var config = store.config.first()
+        assertEquals(false, config.locationStageEnabled)
+        assertEquals(true, config.testStageEnabled)
+
+        store.setTestStageEnabled(false)
+        config = store.config.first()
+        assertEquals(false, config.locationStageEnabled)
+        assertEquals(false, config.testStageEnabled)
+
+        store.setLocationStageEnabled(true)
+        config = store.config.first()
+        assertEquals(true, config.locationStageEnabled)
+        assertEquals(false, config.testStageEnabled)
+    }
+
+    @Test
+    fun `stage toggles persist across a new store instance over the same file`() = runTest {
+        // # F003 AC-F3-1/5：跨实例持久化（与上方 persistence 测试同模式）
+        val scope1 = CoroutineScope(backgroundScope.coroutineContext + Job())
+        val store1 = newStore(scope1)
+        store1.setLocationStageEnabled(true)
+        store1.setTestStageEnabled(false)
+        scope1.cancel()
+
+        val store2 = newStore(backgroundScope)
+        val persisted = store2.config.first()
+        assertEquals(true, persisted.locationStageEnabled)
+        assertEquals(false, persisted.testStageEnabled)
+    }
 }
