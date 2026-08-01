@@ -11,5 +11,5 @@ created: 2026-04-01
 
 | ID | Name | Status | Owner | Link |
 |----|------|--------|-------|------|
-| F002 | Fake GPS 精确选点验证 | idea | TBD | [issue #3](https://github.com/TERRYYYC/Faketest/issues/3) |
+| F002 | Fake GPS 精确选点验证 | spec | @kimi | [F002](docs/features/F002-precise-location-verification.md) |
 | F003 | Pipeline Stage Toggles | review | @kimi | [F003](docs/features/F003-pipeline-stage-toggles.md) |
