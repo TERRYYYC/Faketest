@@ -100,6 +100,21 @@ class PlanRepository(private val db: AppDatabase) {
     // ---- Import (atomic, AC-A2) ----
 
     /**
+     * Syncs the buffer into the plan snapshot the engine executes (F6).
+     * Allowed only while the plan is unstarted (all tasks pending, no attempts);
+     * returns false otherwise (field is then next-plan-only).
+     * # 把 buffer 同步进 engine 执行的 plan 快照（F6）：
+     * # 仅计划未启动（全部 pending 且无尝试）时生效，否则返回 false
+     */
+    suspend fun syncBufferIfPlanNotStarted(planId: Long, seconds: Int): Boolean = db.withTransaction {
+        val started = db.locationTaskDao().getTasksForPlan(planId).any { it.status != "pending" } ||
+            db.testAttemptDao().getAttemptsForPlan(planId).isNotEmpty()
+        if (started) return@withTransaction false
+        db.planDao().updateGlobalBuffer(planId, seconds)
+        true
+    }
+
+    /**
      * Persists a validated worklist as plan + tasks in ONE transaction.
      * Callers must run WorklistParser first and pass only Success rows;
      * the unfinished-plan rejection is a UI/policy concern handled before this.

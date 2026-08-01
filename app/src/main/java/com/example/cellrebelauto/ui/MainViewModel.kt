@@ -165,7 +165,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // ---- Plan config setters (independent fields, AC-B5) ----
 
     fun setGlobalBuffer(seconds: Int) {
-        viewModelScope.launch { planConfigStore.setGlobalBufferSeconds(seconds) }
+        viewModelScope.launch {
+            // # DataStore 始终写：作为下次导入的默认值
+            planConfigStore.setGlobalBufferSeconds(seconds)
+            // # F6：计划未启动时同步 engine 执行的 plan 快照，UI 展示值 == 执行值；
+            // # 计划已启动则快照不动（UI 标注 next-plan-only）
+            planUiState.value.plan?.let { plan ->
+                withContext(Dispatchers.IO) {
+                    planRepository.syncBufferIfPlanNotStarted(plan.id, seconds)
+                }
+            }
+        }
     }
 
     fun setTestTimeout(seconds: Int) {

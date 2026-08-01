@@ -189,6 +189,7 @@ fun PlanScreen(
         // # 全局缓冲：唯一业务参数，首次必填并持久化（设计稿 v2.1）
         item {
             BufferField(
+                planState = planState,
                 planConfig = planConfig,
                 onSetGlobalBuffer = onSetGlobalBuffer
             )
@@ -297,18 +298,27 @@ fun PlanScreen(
 
 /**
  * Global buffer field — the only business parameter, first-run required and
- * persisted. Valid non-negative integers save immediately.
- * # 全局缓冲输入框：唯一业务参数，首次必填并持久化；合法输入即时保存
+ * persisted. Displays the EFFECTIVE value (F6): once a plan exists, that is the
+ * plan snapshot the engine executes; locked to next-plan-only once started.
+ * # 全局缓冲输入框：唯一业务参数，首次必填并持久化。
+ * # 展示有效值（F6）：计划存在即展示 engine 执行的 plan 快照；
+ * # 计划启动后锁定（仅对下次导入生效）
  */
 @Composable
 private fun BufferField(
+    planState: PlanUiState,
     planConfig: PlanConfig,
     onSetGlobalBuffer: (Int) -> Unit
 ) {
+    // # 有效值 = engine 执行值（计划存在用 plan 快照，否则用 DataStore 默认）
+    val effectiveBuffer = planState.plan?.globalBufferSeconds ?: planConfig.globalBufferSeconds
+    // # 计划已启动 → 锁定，修改只对下次导入生效
+    val locked = planState.isStarted
+
     var bufferText by remember { mutableStateOf("") }
-    // # DataStore 异步加载完成后回填已持久化的值
-    LaunchedEffect(planConfig.globalBufferSeconds) {
-        bufferText = planConfig.globalBufferSeconds?.toString() ?: ""
+    // # 有效值变化（DataStore 异步加载 / 快照同步完成）后回填
+    LaunchedEffect(effectiveBuffer) {
+        bufferText = effectiveBuffer?.toString() ?: ""
     }
 
     Column {
@@ -320,11 +330,15 @@ private fun BufferField(
             },
             label = { Text("Global buffer between attempts (s)") },
             supportingText = {
-                if (planConfig.globalBufferSeconds == null) {
-                    Text("Required before import", color = MaterialTheme.colorScheme.error)
+                when {
+                    effectiveBuffer == null ->
+                        Text("Required before import", color = MaterialTheme.colorScheme.error)
+                    locked ->
+                        Text("Locked for current plan — changes apply to next import")
                 }
             },
-            isError = planConfig.globalBufferSeconds == null,
+            isError = effectiveBuffer == null,
+            enabled = !locked,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
         )
