@@ -1,11 +1,11 @@
 package com.example.cellrebelauto.automation
 
 import android.util.Log
-import com.example.cellrebelauto.model.AutoConfig
+import com.example.cellrebelauto.automation.plan.BufferGate
+import com.example.cellrebelauto.automation.plan.PlanScheduler
 import com.example.cellrebelauto.model.AutomationState
-import com.example.cellrebelauto.model.TestResult
-import com.example.cellrebelauto.repository.TestRepository
-import com.example.cellrebelauto.util.GpsRandomizer
+import com.example.cellrebelauto.model.plan.TestAttempt
+import com.example.cellrebelauto.repository.PlanRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
@@ -16,34 +16,74 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
- * Main automation orchestrator — drives the complete test cycle using
- * a sequential coroutine-based approach instead of an event-driven state machine.
+ * Snapshot of the task currently being attempted (Run page status card).
+ * # 当前正在尝试的任务快照（Run 页状态卡）
+ */
+data class EngineTaskSnapshot(
+    val csvRow: Int,
+    val priority: Int,
+    val latitude: Double,
+    val longitude: Double,
+    val completedSuccesses: Int,
+    val requiredSuccesses: Int,
+    val attemptOrdinal: Int
+)
+
+/**
+ * Scheduler cooldown projection (Run page cooldown card). Emitted once when
+ * the buffer wait starts; the UI counts down locally from startedAtMs.
+ * # scheduler 缓冲倒计时投影：等待开始时发射一次，UI 基于 startedAtMs 本地倒数
+ */
+data class CooldownInfo(
+    val startedAtMs: Long,
+    val remainingMs: Long,
+    val totalMs: Long,
+    // # 倒计时结束后的去向：同点重试 / 前进下一点
+    val nextAction: String
+)
+
+/**
+ * Most recent failed attempt (Run page last-failure line, INV-10 visible).
+ * # 最近一次失败尝试（Run 页 last failure 行）
+ */
+data class LastFailureInfo(
+    val attemptOrdinal: Int,
+    val reason: String
+)
+
+/**
+ * Plan-driven automation orchestrator (F001). Executes the imported location
+ * worklist in deterministic order, counting only verified CellRebel successes
+ * toward per-location quotas.
  *
- * # 自动化主引擎 — 使用顺序协程驱动完整的测试循环
- * # 相比事件驱动的状态机，代码更线性、更易理解
+ * Run loop:
+ *   1. Recovery sweep FIRST — leftover non-terminal attempts → interrupted,
+ *      stale `running` sessions → interrupted (INV-9, O3/O4)
+ *   2. selectNext (active-unfinished first, then priority ASC / csvRow ASC)
+ *   3. BufferGate wait from persisted last-terminal endedAt (INV-5, after
+ *      BOTH success and failure)
+ *   4. GPS settle, then Fake GPS setLocation — failure → typed failed attempt,
+ *      NO quota consumed (INV-10)
+ *   5. runTest — Success finalized in ONE Room transaction (attempt row +
+ *      guarded task increment, INV-3); Failure persisted with typed reason (INV-4)
+ *   6. quota met → task completed; all complete → session completed
  *
- * Workflow per cycle:
- *   1. Generate random GPS coordinates
- *   2. Open Fake GPS → set location on map → start spoofing
- *   3. Wait for GPS to settle (cycleIntervalSeconds)
- *   4. Open CellRebel → run test → collect scores
- *   5. Save results
- *   6. Repeat until maxCycles or stopped
- *
- * # 每次循环的工作流：
- * #   1. 生成随机 GPS 坐标
- * #   2. 打开 Fake GPS → 在地图上设置位置 → 开始伪造
- * #   3. 等待 GPS 信号稳定（cycleIntervalSeconds）
- * #   4. 打开 CellRebel → 运行测试 → 采集分数
- * #   5. 保存结果
- * #   6. 重复直到达到最大循环数或被停止
+ * # 计划驱动的自动化编排器（F001）：恢复清扫优先 → 确定性选任务 →
+ * # 缓冲门禁 → GPS 稳定/落点（失败即停、不占配额）→ 已验证测试 →
+ * # 单事务成功收尾 / 类型化失败记录 → 配额完成推进
  */
 class AutomationEngine(
-    private val config: AutoConfig,
-    private val repository: TestRepository,
-    private val bridge: AccessibilityBridge,
-    private val cellRebelHandler: CellRebelHandler,
-    private val fakeGpsHandler: FakeGpsHandler
+    private val planId: Long,
+    private val planRepository: PlanRepository,
+    private val cellRebelRunner: CellRebelRunner,
+    private val gpsSetter: GpsLocationSetter,
+    private val bufferGate: BufferGate,
+    private val testTimeoutMs: Long,
+    private val gpsSettleMs: Long,
+    // # 仅用于 returnToSelf（MIUI 中转）；测试不传
+    private val bridge: AccessibilityBridge? = null,
+    private val nowMs: () -> Long = { System.currentTimeMillis() },
+    private val delayMs: suspend (Long) -> Unit = { delay(it) }
 ) {
     companion object {
         private const val TAG = "AutoEngine"
@@ -55,7 +95,7 @@ class AutomationEngine(
     private val _state = MutableStateFlow(AutomationState.IDLE)
     val state: StateFlow<AutomationState> = _state
 
-    // # 已完成的循环数
+    // # 已执行的尝试数
     private val _cycleCount = MutableStateFlow(0)
     val cycleCount: StateFlow<Int> = _cycleCount
 
@@ -63,109 +103,233 @@ class AutomationEngine(
     private val _logs = MutableStateFlow<List<String>>(emptyList())
     val logs: StateFlow<List<String>> = _logs
 
-    private val gpsRandomizer = GpsRandomizer(config)
+    // # 当前任务快照（Run 页状态卡）
+    private val _currentTask = MutableStateFlow<EngineTaskSnapshot?>(null)
+    val currentTask: StateFlow<EngineTaskSnapshot?> = _currentTask
+
+    // # scheduler 缓冲倒计时投影（Run 页 cooldown 卡）
+    private val _cooldown = MutableStateFlow<CooldownInfo?>(null)
+    val cooldown: StateFlow<CooldownInfo?> = _cooldown
+
+    // # 最近一次失败（Run 页 last failure 行）
+    private val _lastFailure = MutableStateFlow<LastFailureInfo?>(null)
+    val lastFailure: StateFlow<LastFailureInfo?> = _lastFailure
+
     private var runSessionId: Long = 0
+    // # 在途尝试（停止/取消时标记 interrupted）
+    private var currentAttemptId: Long? = null
 
     /**
-     * Runs the full automation loop. Call from a coroutine scope.
-     * Cancelling the coroutine cleanly stops the automation.
+     * Runs the full plan loop. Call from a coroutine scope; cancelling the
+     * coroutine cleanly stops the automation (in-flight attempt → interrupted).
      *
-     * # 运行完整的自动化循环。在协程作用域中调用。
-     * # 取消协程即可优雅地停止自动化。
+     * # 运行完整的计划循环。取消协程即优雅停止（在途尝试标记 interrupted）
      */
     suspend fun run() = coroutineScope {
-        // # 创建数据库会话
-        runSessionId = repository.createSession(config.toSnapshot())
-        _cycleCount.value = 0
-        log("=== Automation started (session #$runSessionId) ===")
-        log("GPS range: (${config.minLat},${config.minLng}) → (${config.maxLat},${config.maxLng})")
-        log("Settings: collect=${config.collectDelaySeconds}s, interval=${config.cycleIntervalSeconds}s, maxCycles=${config.maxCycles}")
-
         try {
-            while (isActive) {
-                val cycleIndex = _cycleCount.value + 1
-                log("--- Cycle $cycleIndex ---")
-
-                // # 生成新的随机 GPS 坐标
-                val (lat, lng) = gpsRandomizer.randomPoint()
-                log("Target: ($lat, $lng)")
-
-                // ==================== Phase 1 & 2: Fake GPS ====================
-                updateState(AutomationState.LAUNCHING_FAKE_GPS)
-                val gpsSuccess = retryWithFallback("Set Fake GPS") {
-                    fakeGpsHandler.setLocation(lat, lng)
-                }
-                ensureActive()
-
-                if (!gpsSuccess) {
-                    log("WARNING: Fake GPS failed, continuing with CellRebel anyway")
-                }
-
-                // # Fake GPS 完成后，回到自己的 app（MIUI 从自己前台启动第三方才放行）
-                returnToSelf()
-                ensureActive()
-
-                // # 等待 GPS 信号稳定
-                updateState(AutomationState.WAITING_INTERVAL)
-                log("Waiting ${config.cycleIntervalSeconds}s for GPS to settle...")
-                delay(config.cycleIntervalSeconds * 1000L)
-                ensureActive()
-
-                // ==================== Phase 3: Run CellRebel test ====================
-                updateState(AutomationState.LAUNCHING_CELLREBEL)
-                var testScores: CellRebelHandler.TestScores? = null
-
-                val testSuccess = retryWithFallback("Run CellRebel test") {
-                    testScores = cellRebelHandler.runTest(
-                        collectDelayMs = config.collectDelaySeconds * 1000L
-                    )
-                }
-
-                ensureActive()
-
-                // # CellRebel 完成后，回到自己的 app（为下一轮 Fake GPS 做准备）
-                returnToSelf()
-
-                // ==================== Phase 4: Save result ====================
-                updateState(AutomationState.COLLECTING_RESULT)
-                val result = TestResult(
-                    runSessionId = runSessionId,
-                    timestamp = System.currentTimeMillis(),
-                    webBrowsingScore = testScores?.webBrowsingScore ?: -1.0,
-                    videoStreamingScore = testScores?.videoStreamingScore ?: -1.0,
-                    latitude = lat,
-                    longitude = lng,
-                    cycleIndex = cycleIndex,
-                    status = if (testScores != null) "ok" else "error_no_scores"
-                )
-                repository.insertResult(result)
-
-                _cycleCount.value = cycleIndex
-                log("Cycle $cycleIndex complete: Web=${result.webBrowsingScore}, Video=${result.videoStreamingScore}")
-
-                // # 检查是否达到最大循环数
-                if (config.maxCycles > 0 && cycleIndex >= config.maxCycles) {
-                    log("Max cycles reached (${config.maxCycles}). Done.")
-                    break
-                }
+            // ==================== Step 1: recovery sweep FIRST (INV-9) ====================
+            val sweptAttempts = planRepository.markNonTerminalInterrupted(nowMs())
+            val sweptSessions = planRepository.markStaleSessionsInterrupted(nowMs())
+            if (sweptAttempts > 0 || sweptSessions > 0) {
+                log("Recovery sweep: $sweptAttempts attempt(s) + $sweptSessions session(s) marked interrupted")
+            }
+            // # F5 兜底：满配额但状态未翻转的历史崩溃窗口任务 → completed
+            val normalized = planRepository.normalizeQuotaCompletedTasks()
+            if (normalized > 0) {
+                log("Recovery sweep: $normalized quota-full task(s) normalized to completed")
             }
 
-            // # 正常完成
-            updateState(AutomationState.DONE)
-            repository.finishSession(runSessionId, "completed", _cycleCount.value)
-            log("=== Automation completed: ${_cycleCount.value} cycles ===")
+            val plan = planRepository.getPlan(planId)
+            if (plan == null) {
+                log("ERROR: plan #$planId not found")
+                updateState(AutomationState.ERROR)
+                return@coroutineScope
+            }
+
+            runSessionId = planRepository.createSession(planId, nowMs())
+            _cycleCount.value = 0
+            log("=== Plan run started (plan #$planId, session #$runSessionId) ===")
+
+            // ==================== Step 2+: plan loop ====================
+            var tasks = planRepository.getTasks(planId)
+            while (isActive && !PlanScheduler.isPlanComplete(tasks)) {
+                val task = PlanScheduler.selectNext(tasks) ?: break
+                ensureActive()
+
+                // # 选中时是否为 pending（cooldown 卡的下一步去向据此投影）
+                val advancingToNewTask = task.status == "pending"
+                // # 新选中的 pending 任务 → active
+                if (advancingToNewTask) {
+                    planRepository.markTaskActive(task.id)
+                }
+                log("--- Location csvRow=${task.csvRow} (${task.latitude},${task.longitude}) " +
+                    "success ${task.completedSuccesses}/${task.requiredSuccesses} ---")
+
+                // # 缓冲门禁（INV-5）：成功和失败后都要等（从持久化 endedAt 投影）
+                val lastEndedAt = planRepository.latestTerminalAttemptEndedAt(planId)
+                val remainingMs = bufferGate.remainingMs(lastEndedAt)
+                if (remainingMs > 0) {
+                    updateState(AutomationState.COOLDOWN)
+                    _cooldown.value = CooldownInfo(
+                        startedAtMs = nowMs(),
+                        remainingMs = remainingMs,
+                        totalMs = bufferGate.bufferSeconds * 1000L,
+                        nextAction = if (advancingToNewTask)
+                            "advance to next location"
+                        else
+                            "retry same location"
+                    )
+                    log("Buffer gate: waiting ${remainingMs / 1000}s before next attempt")
+                    delayMs(remainingMs)
+                    _cooldown.value = null
+                    ensureActive()
+                }
+
+                // # 创建尝试行（starting），ordinal = 任务内计数 + 1
+                val startedAt = nowMs()
+                val attemptOrdinal = planRepository.countAttemptsForTask(task.id) + 1
+                val attemptId = planRepository.insertAttempt(
+                    TestAttempt(
+                        taskId = task.id,
+                        runSessionId = runSessionId,
+                        attemptOrdinal = attemptOrdinal,
+                        successOrdinal = null,
+                        startedAt = startedAt,
+                        runningObservedAt = null,
+                        endedAt = null,
+                        status = "starting",
+                        failureReason = null,
+                        webBrowsingScore = null,
+                        videoStreamingScore = null,
+                        latitude = task.latitude,
+                        longitude = task.longitude
+                    )
+                )
+                currentAttemptId = attemptId
+                _cycleCount.value = _cycleCount.value + 1
+                _currentTask.value = EngineTaskSnapshot(
+                    csvRow = task.csvRow,
+                    priority = task.priority,
+                    latitude = task.latitude,
+                    longitude = task.longitude,
+                    completedSuccesses = task.completedSuccesses,
+                    requiredSuccesses = task.requiredSuccesses,
+                    attemptOrdinal = attemptOrdinal
+                )
+
+                // ==================== Fake GPS（失败即停，INV-10） ====================
+                updateState(AutomationState.LAUNCHING_FAKE_GPS)
+                val gpsOutcome = gpsSetter.setLocation(task.latitude, task.longitude)
+                ensureActive()
+                if (gpsOutcome is GpsOutcome.Failed) {
+                    log("GPS failed: ${gpsOutcome.reason} — typed failed attempt, no quota consumed")
+                    planRepository.finalizeAttemptFailure(attemptId, gpsOutcome.reason.name, nowMs())
+                    updateState(AutomationState.FAILED)
+                    _lastFailure.value = LastFailureInfo(attemptOrdinal, gpsOutcome.reason.name)
+                    currentAttemptId = null
+                    returnToSelf()
+                    tasks = planRepository.getTasks(planId)
+                    continue
+                }
+
+                // # GPS 稳定等待（F3）：锚在新坐标激活确认之后、CellRebel 启动之前，
+                // # 旅程顺序 = Setting GPS → GPS settling → Testing
+                if (gpsSettleMs > 0) {
+                    updateState(AutomationState.WAITING_INTERVAL)
+                    log("Waiting ${gpsSettleMs / 1000}s for GPS to settle...")
+                    delayMs(gpsSettleMs)
+                    ensureActive()
+                }
+
+                // ==================== CellRebel verified attempt ====================
+                returnToSelf()
+                updateState(AutomationState.LAUNCHING_CELLREBEL)
+                val outcome = cellRebelRunner.runTest(startedAt, testTimeoutMs) { runningAt ->
+                    // # C2：观察到 RUNNING 的瞬间持久化 starting -> running 迁移（spec O3）
+                    planRepository.markAttemptRunning(attemptId, runningAt)
+                }
+                ensureActive()
+                returnToSelf()
+
+                // ==================== Finalize ====================
+                updateState(AutomationState.PROCESSING)
+                when (outcome) {
+                    is AttemptOutcome.Success -> {
+                        // # INV-3：单事务收尾（尝试行 + 守卫式自增）
+                        val finalized = planRepository.finalizeAttemptSuccess(
+                            attemptId = attemptId,
+                            taskId = task.id,
+                            expectedCompletedSuccesses = task.completedSuccesses,
+                            runningObservedAt = outcome.runningObservedAt,
+                            endedAt = outcome.endedAt,
+                            webScore = outcome.webScore,
+                            videoScore = outcome.videoScore
+                        )
+                        if (!finalized) {
+                            log("WARNING: finalize skipped (stale expected count) — idempotent guard held")
+                        }
+                        val updated = planRepository.getTask(task.id)
+                        if (updated != null) {
+                            // # 刷新 Run 页状态卡上的成功计数
+                            _currentTask.value = _currentTask.value
+                                ?.copy(completedSuccesses = updated.completedSuccesses)
+                            // # F5：配额达成 → completed 已在 finalize 事务内完成
+                            if (updated.status == "completed") {
+                                log("Location csvRow=${task.csvRow} quota complete ✔")
+                            }
+                        }
+                        updateState(AutomationState.SUCCEEDED)
+                        log("Attempt $attemptOrdinal succeeded: Web=${outcome.webScore}, Video=${outcome.videoScore}")
+                    }
+                    is AttemptOutcome.Failure -> {
+                        // # INV-4：失败持久化，不计入配额
+                        planRepository.finalizeAttemptFailure(attemptId, outcome.reason.name, outcome.endedAt)
+                        updateState(AutomationState.FAILED)
+                        _lastFailure.value = LastFailureInfo(attemptOrdinal, outcome.reason.name)
+                        log("Attempt $attemptOrdinal failed: ${outcome.reason} (${outcome.detail ?: "no detail"})")
+                    }
+                }
+                currentAttemptId = null
+                tasks = planRepository.getTasks(planId)
+            }
+
+            // # 只有计划投影真正 complete 才算成功完成（F5：selectNext == null
+            // # 但投影未完成 = 状态不一致，绝不记 completed）
+            tasks = planRepository.getTasks(planId)
+            if (PlanScheduler.isPlanComplete(tasks)) {
+                updateState(AutomationState.DONE)
+                planRepository.finishSession(runSessionId, "completed", nowMs(), _cycleCount.value)
+                log("=== Plan completed: ${_cycleCount.value} attempts ===")
+            } else {
+                updateState(AutomationState.ERROR)
+                planRepository.finishSession(runSessionId, "error", nowMs(), _cycleCount.value)
+                log("=== ERROR: no selectable task but plan projection is NOT complete ===")
+            }
 
         } catch (e: CancellationException) {
-            // # 被用户取消
+            // # 停止/取消：在途尝试标记 interrupted，会话 stopped
+            _cooldown.value = null
+            currentAttemptId?.let { planRepository.markAttemptInterruptedIfNonTerminal(it, nowMs()) }
             updateState(AutomationState.IDLE)
-            repository.finishSession(runSessionId, "stopped", _cycleCount.value)
+            if (runSessionId != 0L) {
+                planRepository.finishSession(runSessionId, "stopped", nowMs(), _cycleCount.value)
+            }
             log("=== Automation stopped by user ===")
             throw e // # 重新抛出以正确传播取消
 
         } catch (e: Exception) {
-            // # 不可恢复的错误
+            // # 不可恢复的错误：在飞 attempt 也要终态化（typed，不留孤儿，F7）；
+            // # 终态化本身的失败不掩盖原异常
+            currentAttemptId?.let { attemptId ->
+                runCatching {
+                    planRepository.markAttemptInterruptedIfNonTerminal(attemptId, nowMs())
+                }.onFailure { Log.w(TAG, "failed to terminalize in-flight attempt $attemptId", it) }
+            }
+            currentAttemptId = null
             updateState(AutomationState.ERROR)
-            repository.finishSession(runSessionId, "error", _cycleCount.value)
+            if (runSessionId != 0L) {
+                planRepository.finishSession(runSessionId, "error", nowMs(), _cycleCount.value)
+            }
             log("=== Automation ERROR: ${e.message} ===")
             Log.e(TAG, "Automation failed", e)
         }
@@ -190,7 +354,7 @@ class AutomationEngine(
                 log("RETRY: $stepName failed (attempt $attempt/$maxRetries): ${e.message}")
                 Log.w(TAG, "$stepName attempt $attempt failed", e)
                 if (attempt < maxRetries) {
-                    delay(2000L * attempt) // # 递增延迟重试
+                    delayMs(2000L * attempt) // # 递增延迟重试
                 }
             }
         }
@@ -202,12 +366,15 @@ class AutomationEngine(
      * Returns to our own app via Recent Apps.
      * MIUI allows startActivity for third-party apps only when our app
      * is genuinely in the foreground, so we use this as a "hub" between phases.
+     * No-op when no bridge is attached (unit tests).
      *
      * # 通过最近任务切换回自己的 app。
      * # MIUI 只有在自己 app 真正在前台时才放行 startActivity，
      * # 所以每次切换第三方 app 之间都要回到自己作为中转。
+     * # 无桥接（单测）时为空操作
      */
     private suspend fun returnToSelf() {
+        val bridge = bridge ?: return
         val selfPkg = bridge.getServicePackageName()
         if (bridge.getCurrentPackage() == selfPkg) {
             log("Already at our app")

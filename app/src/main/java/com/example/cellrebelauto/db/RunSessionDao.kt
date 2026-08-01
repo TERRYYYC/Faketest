@@ -24,6 +24,16 @@ interface RunSessionDao {
     @Query("SELECT * FROM run_sessions ORDER BY startedAt DESC LIMIT 1")
     suspend fun getLatest(): RunSession?
 
+    @Query("SELECT * FROM run_sessions WHERE id = :id")
+    suspend fun getById(id: Long): RunSession?
+
+    /**
+     * Recovery sweep (O4): sessions left `running` by a dead process → interrupted.
+     * # 恢复清扫（O4）：进程死亡残留的 running 会话 → interrupted
+     */
+    @Query("UPDATE run_sessions SET status = 'interrupted', endedAt = :nowMs WHERE status = 'running'")
+    suspend fun markStaleRunningSessionsInterrupted(nowMs: Long): Int
+
     // # 获取所有会话列表（用于历史查看）
     @Query("SELECT * FROM run_sessions ORDER BY startedAt DESC")
     fun getAllSessions(): Flow<List<RunSession>>

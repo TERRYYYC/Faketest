@@ -3,6 +3,10 @@ package com.example.cellrebelauto.automation
 import android.graphics.Rect
 import android.util.Log
 import android.view.accessibility.AccessibilityNodeInfo
+import com.example.cellrebelauto.automation.cellrebel.flatten
+import com.example.cellrebelauto.automation.cellrebel.toScreenNode
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -30,7 +34,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 class FakeGpsHandler(
     private val bridge: AccessibilityBridge,
     private val onLog: (String) -> Unit
-) {
+) : GpsLocationSetter {
     companion object {
         const val PACKAGE = "com.hopefactory2021.fakegpslocation"
         private const val TAG = "FakeGpsHandler"
@@ -43,41 +47,73 @@ class FakeGpsHandler(
 
     /**
      * Sets a fake GPS location using the map-based workflow.
-     * # 使用地图定位方式设置伪造 GPS 位置
+     * Fail-closed (AC-B4): returns a typed [GpsOutcome]; activation counts only
+     * when the "Stop Fake GPS" button appears after the start sequence.
+     *
+     * # 使用地图定位方式设置伪造 GPS 位置。
+     * # 失败即停（AC-B4）：返回类型化结果；只有开始流程结束后
+     * # "Stop Fake GPS" 按钮出现才算激活成功，不再有告警后继续的路径
      *
      * @param lat Target latitude / 目标纬度
      * @param lng Target longitude / 目标经度
      */
-    suspend fun setLocation(lat: Double, lng: Double) {
-        // # 第 1 步：启动应用
+    override suspend fun setLocation(lat: Double, lng: Double): GpsOutcome {
+        // # 第 1 步：启动应用（前台切换失败 → FOREGROUND_SWITCH_FAILED）
         log("Launching Fake GPS...")
-        launchAndWaitForForeground()
+        try {
+            launchAndWaitForForeground()
+        } catch (e: TimeoutCancellationException) {
+            return GpsOutcome.Failed(FailureReason.FOREGROUND_SWITCH_FAILED, "Fake GPS launch timed out")
+        } catch (e: CancellationException) {
+            throw e // # 不拦截取消
+        } catch (e: Exception) {
+            return GpsOutcome.Failed(FailureReason.FOREGROUND_SWITCH_FAILED, e.message)
+        }
 
-        // # 第 2 步：检查并停止已有 GPS 伪造
-        log("Checking for active GPS spoofing...")
-        stopExistingGpsIfRunning()
+        return try {
+            // # 第 2 步：检查并停止已有 GPS 伪造（F4：停不掉 = typed failure，不再吞超时）
+            log("Checking for active GPS spoofing...")
+            val previousSpoofingStopped = stopExistingGpsIfRunning()
 
-        // # 第 3 步：通过搜索框输入坐标，将地图导航到目标位置
-        log("Searching location: $lat, $lng")
-        searchCoordinates(lat, lng)
+            // # 第 3 步：通过搜索框输入坐标，将地图导航到目标位置
+            log("Searching location: $lat, $lng")
+            searchCoordinates(lat, lng)
 
-        // # 第 4 步：收起键盘（点击地图区域）+ 等待地图加载
-        log("Dismissing keyboard & waiting for map to load...")
-        dismissKeyboard()
-        delay(MAP_LOAD_DELAY)
+            // # 第 4 步：收起键盘（点击地图区域）+ 等待地图加载
+            log("Dismissing keyboard & waiting for map to load...")
+            dismissKeyboard()
+            delay(MAP_LOAD_DELAY)
 
-        // # 第 5 步：点击地图中心放置标记
-        log("Tapping map center to place pin...")
-        tapMapCenter()
+            // # 第 5 步：点击地图中心放置标记
+            log("Tapping map center to place pin...")
+            tapMapCenter()
 
-        // # 第 6 步：等待短暂延迟后点击 Start
-        delay(1000)
+            // # 第 6 步：等待短暂延迟后点击 Start
+            delay(1000)
 
-        // # 第 7 步：点击 "Start Fake GPS"
-        log("Starting Fake GPS...")
-        clickStartFakeGps()
+            // # 第 7 步：点击 "Start Fake GPS"（F4：结果必须入账，不得丢弃）
+            log("Starting Fake GPS...")
+            val startSequenceConfirmed = clickStartFakeGps()
 
-        log("Fake GPS location set to ($lat, $lng)")
+            // # 第 8 步：归属判定 —— 只有本次调用的序列被确认才 Active（F4）
+            val nodes = bridge.getRootNode()?.toScreenNode()?.flatten()
+            val outcome = resolveActivationOutcome(
+                previousSpoofingStopped = previousSpoofingStopped,
+                startSequenceConfirmed = startSequenceConfirmed,
+                finalNodes = nodes ?: emptyList()
+            )
+            when (outcome) {
+                is GpsOutcome.Active -> log("Fake GPS location set to ($lat, $lng) — activation confirmed")
+                is GpsOutcome.Failed -> log("ERROR: Fake GPS activation unproven at ($lat, $lng): ${outcome.detail}")
+            }
+            outcome
+        } catch (e: TimeoutCancellationException) {
+            GpsOutcome.Failed(FailureReason.FAKE_GPS_NOT_ACTIVE, "activation step timed out: ${e.message}")
+        } catch (e: CancellationException) {
+            throw e // # 不拦截取消
+        } catch (e: Exception) {
+            GpsOutcome.Failed(FailureReason.FAKE_GPS_NOT_ACTIVE, e.message)
+        }
     }
 
     // ---- Step implementations ----
@@ -99,27 +135,40 @@ class FakeGpsHandler(
 
     /**
      * If "Stop Fake GPS" button is visible, click it to stop the current spoofing.
-     * # 如果看到 "Stop Fake GPS" 按钮，点击停止当前伪造
+     * Returns true when no spoofing was active OR the stop was confirmed (Start
+     * button reappeared); false when the stop could not be proven (F4 — the old
+     * Stop button is then stale and must fail the whole activation closed).
+     * # 如果看到 "Stop Fake GPS" 按钮，点击停止当前伪造。
+     * # 返回 true = 无旧伪造或停止已确认（Start 按钮复现）；
+     * # false = 停止未被证实（旧 Stop 残留，整个激活必须失败即停）
      */
-    private suspend fun stopExistingGpsIfRunning() {
-        val root = bridge.getRootNode() ?: return
+    private suspend fun stopExistingGpsIfRunning(): Boolean {
+        val root = bridge.getRootNode() ?: return true
         val stopBtn = findStopButton(root)
         if (stopBtn != null) {
             log("Found active GPS, stopping...")
             bridge.clickNode(stopBtn)
             delay(2000) // # 等待停止完成
 
-            // # 验证已停止（Start 按钮应该出现）
-            withTimeoutOrNull(ACTION_TIMEOUT) {
+            // # 验证已停止（Start 按钮应该出现）；超时不再吞掉（F4）
+            val stopped = withTimeoutOrNull(ACTION_TIMEOUT) {
                 while (true) {
                     val newRoot = bridge.getRootNode() ?: run { delay(POLL_INTERVAL); continue }
-                    if (findStartButton(newRoot) != null) return@withTimeoutOrNull
+                    if (findStartButton(newRoot) != null) return@withTimeoutOrNull true
                     delay(POLL_INTERVAL)
                 }
+                @Suppress("UNREACHABLE_CODE")
+                false
             }
-            log("GPS spoofing stopped")
+            if (stopped == true) {
+                log("GPS spoofing stopped")
+                return true
+            }
+            log("ERROR: stop not confirmed — old Stop button is stale")
+            return false
         } else {
             log("No active GPS spoofing found")
+            return true
         }
     }
 
@@ -220,11 +269,13 @@ class FakeGpsHandler(
 
     /**
      * Clicks the "Start Fake GPS" button.
-     * # 点击 "Start Fake GPS" 按钮
+     * Returns true only when the Stop button proves activation.
+     * # 点击 "Start Fake GPS" 按钮。
+     * # 仅当 Stop 按钮证实激活时返回 true
      */
-    private suspend fun clickStartFakeGps() {
+    private suspend fun clickStartFakeGps(): Boolean {
         var diagLogged = false
-        withTimeout(ACTION_TIMEOUT) {
+        val confirmed = withTimeoutOrNull(ACTION_TIMEOUT) {
             while (true) {
                 val root = bridge.getRootNode() ?: run { delay(POLL_INTERVAL); continue }
                 val startBtn = findStartButton(root)
@@ -240,7 +291,7 @@ class FakeGpsHandler(
                     val checkRoot1 = bridge.getRootNode()
                     if (checkRoot1 != null && findStopButton(checkRoot1) != null) {
                         log("Fake GPS confirmed active after ACTION_CLICK")
-                        return@withTimeout
+                        return@withTimeoutOrNull true
                     }
 
                     // # 第一次没生效，用坐标点击兜底
@@ -252,10 +303,11 @@ class FakeGpsHandler(
                     val checkRoot2 = bridge.getRootNode()
                     if (checkRoot2 != null && findStopButton(checkRoot2) != null) {
                         log("Fake GPS confirmed active after dispatchTap")
-                    } else {
-                        log("WARNING: Start Fake GPS clicked but Stop button not found")
+                        return@withTimeoutOrNull true
                     }
-                    return@withTimeout
+                    // # 失败即停：未证实激活，返回 false 由上层产出类型化失败
+                    log("Start Fake GPS clicked but Stop button not found — activation unproven")
+                    return@withTimeoutOrNull false
                 }
 
                 // # 找不到按钮时输出一次诊断
@@ -268,7 +320,13 @@ class FakeGpsHandler(
                 }
                 delay(POLL_INTERVAL)
             }
+            @Suppress("UNREACHABLE_CODE")
+            false
         }
+        if (confirmed == null) {
+            log("ERROR: timed out looking for Start Fake GPS button")
+        }
+        return confirmed == true
     }
 
     /**

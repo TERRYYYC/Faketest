@@ -4,26 +4,91 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.cellrebelauto.model.RunSession
 import com.example.cellrebelauto.model.TestResult
+import com.example.cellrebelauto.model.plan.LocationPlan
+import com.example.cellrebelauto.model.plan.LocationTask
+import com.example.cellrebelauto.model.plan.TestAttempt
 
 /**
  * Room database singleton.
- * # Room 数据库单例，版本 2（新架构重建）
+ * # Room 数据库单例，版本 3（F001 位置测试计划）
  */
 @Database(
-    entities = [TestResult::class, RunSession::class],
-    version = 2,
+    entities = [TestResult::class, RunSession::class, LocationPlan::class, LocationTask::class, TestAttempt::class],
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
 
     abstract fun testResultDao(): TestResultDao
     abstract fun runSessionDao(): RunSessionDao
+    abstract fun planDao(): PlanDao
+    abstract fun locationTaskDao(): LocationTaskDao
+    abstract fun testAttemptDao(): TestAttemptDao
 
     companion object {
         @Volatile
         private var INSTANCE: AppDatabase? = null
+
+        /**
+         * v2 -> v3: run_sessions gains planId; new plan/task/attempt tables.
+         * # v2 到 v3：run_sessions 增加 planId；新增计划/任务/尝试三张表
+         */
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE run_sessions ADD COLUMN planId INTEGER")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `location_plans` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`sourceFileName` TEXT NOT NULL, " +
+                        "`importedAt` INTEGER NOT NULL, " +
+                        "`globalBufferSeconds` INTEGER NOT NULL, " +
+                        "`totalRows` INTEGER NOT NULL, " +
+                        "`totalRequiredSuccesses` INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `location_tasks` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`planId` INTEGER NOT NULL, " +
+                        "`csvRow` INTEGER NOT NULL, " +
+                        "`longitude` REAL NOT NULL, " +
+                        "`latitude` REAL NOT NULL, " +
+                        "`priority` INTEGER NOT NULL, " +
+                        "`requiredSuccesses` INTEGER NOT NULL, " +
+                        "`completedSuccesses` INTEGER NOT NULL DEFAULT 0, " +
+                        "`status` TEXT NOT NULL DEFAULT 'pending', " +
+                        "FOREIGN KEY(`planId`) REFERENCES `location_plans`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_location_tasks_planId` ON `location_tasks`(`planId`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `test_attempts` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`taskId` INTEGER NOT NULL, " +
+                        "`runSessionId` INTEGER NOT NULL, " +
+                        "`attemptOrdinal` INTEGER NOT NULL, " +
+                        "`successOrdinal` INTEGER, " +
+                        "`startedAt` INTEGER NOT NULL, " +
+                        "`runningObservedAt` INTEGER, " +
+                        "`endedAt` INTEGER, " +
+                        "`status` TEXT NOT NULL, " +
+                        "`failureReason` TEXT, " +
+                        "`webBrowsingScore` REAL, " +
+                        "`videoStreamingScore` REAL, " +
+                        "`latitude` REAL NOT NULL, " +
+                        "`longitude` REAL NOT NULL, " +
+                        "FOREIGN KEY(`taskId`) REFERENCES `location_tasks`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE, " +
+                        "FOREIGN KEY(`runSessionId`) REFERENCES `run_sessions`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_test_attempts_taskId` ON `test_attempts`(`taskId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_test_attempts_runSessionId` ON `test_attempts`(`runSessionId`)")
+            }
+        }
 
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -32,8 +97,8 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "cellrebel_auto.db"
                 )
-                    // # 架构升级时销毁旧数据重建（测试阶段可接受）
-                    .fallbackToDestructiveMigration()
+                    // # 非破坏性迁移：保留历史数据
+                    .addMigrations(MIGRATION_2_3)
                     .build()
                     .also { INSTANCE = it }
             }

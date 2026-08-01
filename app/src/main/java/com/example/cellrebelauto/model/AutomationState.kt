@@ -44,6 +44,16 @@ enum class AutomationState(val displayName: String) {
     // # 等待 GPS 信号稳定 / 周期间隔
     WAITING_INTERVAL("Waiting for next cycle..."),
 
+    // --- Attempt terminal + scheduler (F001, wireframe v2.1 §1.2) ---
+    // # 正在收尾一次尝试（持久化结果）
+    PROCESSING("Processing..."),
+    // # 尝试成功（终态）
+    SUCCEEDED("Attempt succeeded"),
+    // # 尝试失败（终态，类型化原因）
+    FAILED("Attempt failed"),
+    // # scheduler 全局缓冲倒计时（attempt 终态之后，INV-5）
+    COOLDOWN("Scheduler cooldown..."),
+
     // --- Terminal ---
     // # 所有循环已完成
     DONE("Done"),
