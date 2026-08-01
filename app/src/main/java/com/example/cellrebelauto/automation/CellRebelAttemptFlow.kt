@@ -29,7 +29,17 @@ interface CellRebelDriver {
  * # 设备上由 CellRebelHandler 实现，测试用假实现
  */
 interface CellRebelRunner {
-    suspend fun runTest(startedAt: Long, testTimeoutMs: Long): AttemptOutcome
+    /**
+     * @param onRunningObserved C2: fired the instant RUNNING evidence is
+     * observed, so the caller can persist the starting -> running transition
+     * immediately (spec O3 state table). Default: no-op.
+     * # 观察到 RUNNING 的瞬间触发，调用方据此立即持久化 running 迁移
+     */
+    suspend fun runTest(
+        startedAt: Long,
+        testTimeoutMs: Long,
+        onRunningObserved: suspend (runningAtMs: Long) -> Unit = {}
+    ): AttemptOutcome
 }
 
 /**
@@ -85,7 +95,8 @@ class CellRebelAttemptFlow(
     suspend fun run(
         driver: CellRebelDriver,
         startedAt: Long,
-        testTimeoutMs: Long
+        testTimeoutMs: Long,
+        onRunningObserved: suspend (runningAtMs: Long) -> Unit = {}
     ): AttemptOutcome {
         // # 预算锚点：进入验证生命周期的时刻（审计 startedAt 不动）
         val anchoredAt = nowMs()
@@ -144,6 +155,8 @@ class CellRebelAttemptFlow(
             val nodes = driver.snapshot()?.flatten()
             if (nodes != null && detector.classify(nodes) == CellRebelScreenState.RUNNING) {
                 runningObservedAt = nowMs()
+                // # C2：观察到即上报，调用方立即持久化 starting -> running 迁移
+                onRunningObserved(runningObservedAt)
                 break
             }
             delayMs(POLL_INTERVAL_MS)

@@ -166,6 +166,10 @@ class PlanRepository(private val db: AppDatabase) {
 
     suspend fun insertAttempt(attempt: TestAttempt): Long = db.testAttemptDao().insert(attempt)
 
+    // # C2：观察到 RUNNING 的瞬间持久化 starting -> running 迁移（仅自 starting）
+    suspend fun markAttemptRunning(attemptId: Long, runningAt: Long) =
+        db.testAttemptDao().markRunning(attemptId, runningAt)
+
     /**
      * Atomic success finalization (INV-3 + F5): guarded task increment, attempt
      * row update, AND quota-reached task completion in ONE Room transaction.

@@ -72,12 +72,24 @@ interface TestAttemptDao {
     suspend fun markNonTerminalInterrupted(nowMs: Long): Int
 
     /**
-     * Finalize a succeeded attempt (called inside the finalize transaction, INV-3).
-     * # 成功尝试收尾（在 finalize 事务内调用）
+     * Persist the starting -> running transition the moment RUNNING evidence is
+     * observed (spec O3 state table, C2). Only from 'starting' — never clobbers
+     * a terminal state.
+     * # 观察到 RUNNING 证据的瞬间持久化 starting -> running 迁移（C2）；
+     * # 仅从 starting 迁移，绝不覆盖终态
      */
     @Query(
+        "UPDATE test_attempts SET status = 'running', runningObservedAt = :runningAt " +
+            "WHERE id = :attemptId AND status = 'starting'"
+    )
+    suspend fun markRunning(attemptId: Long, runningAt: Long): Int
+
+    /**
+     * Finalize a succeeded attempt (called inside the finalize transaction, INV-3).
+     * # 成功尝试收尾（在 finalize 事务内调用）
+     */    @Query(
         "UPDATE test_attempts SET status = 'succeeded', successOrdinal = :successOrdinal, " +
-            "runningObservedAt = :runningObservedAt, endedAt = :endedAt, " +
+            "runningObservedAt = COALESCE(runningObservedAt, :runningObservedAt), endedAt = :endedAt, " +
             "webBrowsingScore = :webScore, videoStreamingScore = :videoScore WHERE id = :attemptId"
     )
     suspend fun markSucceeded(

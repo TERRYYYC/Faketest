@@ -244,7 +244,10 @@ class AutomationEngine(
                 // ==================== CellRebel verified attempt ====================
                 returnToSelf()
                 updateState(AutomationState.LAUNCHING_CELLREBEL)
-                val outcome = cellRebelRunner.runTest(startedAt, testTimeoutMs)
+                val outcome = cellRebelRunner.runTest(startedAt, testTimeoutMs) { runningAt ->
+                    // # C2：观察到 RUNNING 的瞬间持久化 starting -> running 迁移（spec O3）
+                    planRepository.markAttemptRunning(attemptId, runningAt)
+                }
                 ensureActive()
                 returnToSelf()
 

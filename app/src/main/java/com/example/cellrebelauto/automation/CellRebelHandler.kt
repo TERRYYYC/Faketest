@@ -48,7 +48,11 @@ class CellRebelHandler(
      * # [2026-07-31] F001：用真实 testTimeoutMs 取代原先被忽略的 collectDelayMs
      * # 与固定 30s 等待；成功必须观察到 RUNNING → 稳定 COMPLETED 转换（AC-B2）。
      */
-    override suspend fun runTest(startedAt: Long, testTimeoutMs: Long): AttemptOutcome {
+    override suspend fun runTest(
+        startedAt: Long,
+        testTimeoutMs: Long,
+        onRunningObserved: suspend (Long) -> Unit
+    ): AttemptOutcome {
         // # 第 1 步：启动应用并等待前台 + 导航到测试页面
         try {
             log("Launching CellRebel...")
@@ -69,7 +73,12 @@ class CellRebelHandler(
 
         // # 第 2 步：已验证的尝试生命周期（点击 Start → RUNNING 证据 → 稳定完成）
         log("Starting verified attempt lifecycle...")
-        return attemptFlow.run(AndroidCellRebelDriver(bridge, onLog = ::log), startedAt, testTimeoutMs)
+        return attemptFlow.run(
+            AndroidCellRebelDriver(bridge, onLog = ::log),
+            startedAt,
+            testTimeoutMs,
+            onRunningObserved
+        )
     }
 
     // ---- Launch / navigation (bridge-based, MIUI-proven) ----

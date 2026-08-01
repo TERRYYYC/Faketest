@@ -55,7 +55,11 @@ class EngineRecoveryTest {
         var calls = 0
             private set
 
-        override suspend fun runTest(startedAt: Long, testTimeoutMs: Long): AttemptOutcome {
+        override suspend fun runTest(
+            startedAt: Long,
+            testTimeoutMs: Long,
+            onRunningObserved: suspend (Long) -> Unit
+        ): AttemptOutcome {
             calls++
             val template = if (queue.size > 1) queue.removeAt(0) else queue.first()
             return when (template) {
@@ -157,6 +161,8 @@ class EngineRecoveryTest {
         assertEquals("interrupted", attempts[0].status)
         assertEquals("INTERRUPTED", attempts[0].failureReason)
         assertEquals("succeeded", attempts[1].status)
+        // # C2：sweep 不清空已持久化的 runningObservedAt 审计证据
+        assertEquals(650L, attempts[0].runningObservedAt)
 
         // # 计数只来自新尝试；旧残留没有计入
         val task = db.locationTaskDao().getTaskById(taskId)!!
@@ -279,7 +285,11 @@ class EngineRecoveryTest {
             }
         }
         val runner = object : CellRebelRunner {
-            override suspend fun runTest(startedAt: Long, testTimeoutMs: Long): AttemptOutcome {
+            override suspend fun runTest(
+                startedAt: Long,
+                testTimeoutMs: Long,
+                onRunningObserved: suspend (Long) -> Unit
+            ): AttemptOutcome {
                 events.add("run-test")
                 return successTemplate.copy(startedAt = startedAt, endedAt = clock.nowMs())
             }
@@ -297,6 +307,61 @@ class EngineRecoveryTest {
         ).run()
 
         assertEquals(listOf("gps-set", "settle-5000", "run-test"), events)
+    }
+
+    @Test
+    fun `running transition is persisted the moment it is observed`() = runTest {
+        // # C2 回归：观察到 RUNNING 的瞬间 attempt 行必须立即变为 running + 时间戳，
+        // # 而不是等到终局才一次性写（spec O3 状态表 starting -> running）
+        val (planId, taskId) = seedPlan(quota = 1)
+        val clock = VirtualClock()
+        var stateAtObservation: Pair<String, Long?>? = null
+        val runner = object : CellRebelRunner {
+            override suspend fun runTest(
+                startedAt: Long,
+                testTimeoutMs: Long,
+                onRunningObserved: suspend (Long) -> Unit
+            ): AttemptOutcome {
+                onRunningObserved(4242L)
+                // # 回调返回后立刻读库：engine 必须已同步持久化 running 迁移
+                val row = db.testAttemptDao().getAttemptsForTask(taskId).single()
+                stateAtObservation = row.status to row.runningObservedAt
+                return successTemplate.copy(startedAt = startedAt, endedAt = clock.nowMs())
+            }
+        }
+        val gps = FakeGpsSetter(listOf(GpsOutcome.Active))
+        buildEngine(planId, runner, gps, clock).run()
+
+        assertEquals("running" to 4242L, stateAtObservation)
+        // # 终局收尾后 runningObservedAt 保留
+        val final = db.testAttemptDao().getAttemptsForTask(taskId).single()
+        assertEquals("succeeded", final.status)
+        assertEquals(4242L, final.runningObservedAt)
+    }
+
+    @Test
+    fun `running row swept to interrupted keeps runningObservedAt`() = runTest {
+        // # C2 崩溃窗口：running 迁移已持久化后进程死亡（此处以异常模拟），
+        // # recovery 终态化为 interrupted 时 runningObservedAt 审计证据必须保留
+        val (planId, taskId) = seedPlan(quota = 1)
+        val clock = VirtualClock()
+        val runner = object : CellRebelRunner {
+            override suspend fun runTest(
+                startedAt: Long,
+                testTimeoutMs: Long,
+                onRunningObserved: suspend (Long) -> Unit
+            ): AttemptOutcome {
+                onRunningObserved(5555L)
+                throw RuntimeException("process died mid-run")
+            }
+        }
+        val gps = FakeGpsSetter(listOf(GpsOutcome.Active))
+        buildEngine(planId, runner, gps, clock).run()
+
+        val row = db.testAttemptDao().getAttemptsForTask(taskId).single()
+        assertEquals("interrupted", row.status)
+        assertEquals("INTERRUPTED", row.failureReason)
+        assertEquals(5555L, row.runningObservedAt)
     }
 
     @Test
