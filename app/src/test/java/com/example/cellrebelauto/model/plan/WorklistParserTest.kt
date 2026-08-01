@@ -99,6 +99,14 @@ class WorklistParserTest {
     }
 
     @Test
+    fun `header only file with zero data rows is rejected`() {
+        // # F9 回归：零任务僵尸 plan 既不可完成也不可恢复，必须导入即拒
+        val result = WorklistParser.parse("$header\n  \n")
+        assertTrue(result is ParseResult.Failure)
+        assertTrue((result as ParseResult.Failure).errors[0].message.contains("no data rows", ignoreCase = true))
+    }
+
+    @Test
     fun `blank lines are skipped and csv row counts data rows only`() {
         val csv = "$header\n\n116.397,39.908,1,3\n   \n121.474,31.230,2,1\n"
         val result = WorklistParser.parse(csv)

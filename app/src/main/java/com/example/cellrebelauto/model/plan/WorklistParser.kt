@@ -62,8 +62,7 @@ object WorklistParser {
         val rows = mutableListOf<WorklistRow>()
         val errors = mutableListOf<RowError>()
 
-        lines.drop(1).forEachIndexed { index, line ->
-            val csvRow = index + 1
+        lines.drop(1).forEachIndexed { index, line ->            val csvRow = index + 1
             val fields = line.split(",").map { it.trim() }
             if (fields.size != 4) {
                 errors.add(RowError(csvRow, "expected 4 columns (longitude,latitude,priority,required_successes), got ${fields.size}"))
@@ -89,10 +88,13 @@ object WorklistParser {
             }
         }
 
-        return if (errors.isEmpty()) {
-            ParseResult.Success(rows)
-        } else {
+        return if (errors.isNotEmpty()) {
             ParseResult.Failure(errors)
+        } else if (rows.isEmpty()) {
+            // # F9：零数据行 = 僵尸 plan（既不可完成也不可恢复），导入即拒
+            ParseResult.Failure(listOf(RowError(0, "no data rows: the worklist must contain at least one row")))
+        } else {
+            ParseResult.Success(rows)
         }
     }
 }
