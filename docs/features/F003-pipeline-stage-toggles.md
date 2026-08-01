@@ -18,7 +18,7 @@ Operator (2026-08-01 21:38 UTC): the address-selection stage (Fake GPS app) is u
 
 Related: issue #3 (Fake GPS coordinate snap problem, F002 idea) — F003 is the decoupling that makes swapping that app possible without touching the engine.
 
-## Current State
+## Pre-F003 Baseline (state before this feature)
 
 - Engine attempt sequence is hardwired: Fake GPS set+verify → settle → CellRebel verified attempt → finalize (F001, merged `225bdfb`).
 - PlanConfig (DataStore) persists buffer / test timeout / GPS settle; no stage switches.
@@ -53,12 +53,12 @@ Rules:
 
 ## Acceptance Criteria
 
-- [ ] AC-F3-1: Toggle states persist across app restart (DataStore) and default ON.
-- [ ] AC-F3-2: Location OFF → engine never touches Fake GPS (no launch, no settle delay), CellRebel lifecycle and INV-3 quota semantics unchanged; attempt rows/export carry `gps_skipped`.
-- [ ] AC-F3-3: CellRebel OFF → engine never launches CellRebel; verified GPS activation terminates the attempt as `ok_gps_only` and counts quota; export carries `test_skipped`.
-- [ ] AC-F3-4: Both OFF → start rejected with explicit message; no session created.
-- [ ] AC-F3-5: Mid-plan toggle change takes effect from the next attempt without restart.
-- [ ] AC-F3-6: Unit tests for each path (engine stage-skip, persistence, audit columns); full suite + lint green.
+- [x] AC-F3-1: Toggle states persist across app restart (DataStore) and default ON.
+- [x] AC-F3-2: Location OFF → engine never touches Fake GPS (no launch, no settle delay), CellRebel lifecycle and INV-3 quota semantics unchanged; attempt rows/export carry `gps_skipped`.
+- [x] AC-F3-3: CellRebel OFF → engine never launches CellRebel; verified GPS activation terminates the attempt as `ok_gps_only` and counts quota; export carries `test_skipped`.
+- [x] AC-F3-4: Both OFF → start rejected with explicit message; no session created.
+- [x] AC-F3-5: Mid-plan toggle change takes effect from the next attempt without restart.
+- [x] AC-F3-6: Unit tests for each path (engine stage-skip, persistence, audit columns); full suite + lint green.
 
 ## Invariants (extend F001 INV-1..10)
 
