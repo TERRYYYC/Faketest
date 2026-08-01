@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -288,35 +289,29 @@ class AutomationService : AccessibilityService() {
             )
             engine = newEngine
 
-            // # 监听引擎状态并转发到 companion 的 StateFlow
-            launch {
-                newEngine.state.collect { _currentState.value = it }
-            }
-            // # 收集循环计数
-            launch {
-                newEngine.cycleCount.collect { _cycleCount.value = it }
-            }
-            // # 收集日志
-            launch {
-                newEngine.logs.collect { _logs.value = it }
-            }
-            // # 转发 Run 页所需的引擎投影流
-            launch {
-                newEngine.currentTask.collect { _currentTask.value = it }
-            }
-            launch {
-                newEngine.cooldown.collect { _cooldown.value = it }
-            }
-            launch {
-                newEngine.lastFailure.collect { _lastFailure.value = it }
-            }
-
-            // # 运行引擎（阻塞直到完成/取消/出错）
-            try {
-                newEngine.run()
-            } finally {
-                _isRunning.value = false
-                engine = null
+            // # F8：6 个转发 collector 随单次 run 明确取消（流永不完成，
+            // # 不取消则 engine.run 返回后 automationJob 仍存活 → 泄漏）
+            withForwarders(
+                forwarders = listOf(
+                    // # 监听引擎状态并转发到 companion 的 StateFlow
+                    { newEngine.state.collect { _currentState.value = it } },
+                    // # 收集循环计数
+                    { newEngine.cycleCount.collect { _cycleCount.value = it } },
+                    // # 收集日志
+                    { newEngine.logs.collect { _logs.value = it } },
+                    // # 转发 Run 页所需的引擎投影流
+                    { newEngine.currentTask.collect { _currentTask.value = it } },
+                    { newEngine.cooldown.collect { _cooldown.value = it } },
+                    { newEngine.lastFailure.collect { _lastFailure.value = it } }
+                )
+            ) {
+                // # 运行引擎（阻塞直到完成/取消/出错）
+                try {
+                    newEngine.run()
+                } finally {
+                    _isRunning.value = false
+                    engine = null
+                }
             }
         }
     }
@@ -338,5 +333,27 @@ class AutomationService : AccessibilityService() {
         val entry = "[$timestamp] $message"
         _logs.value = (_logs.value + entry).takeLast(200)
         Log.d(TAG, message)
+    }
+}
+
+/**
+ * Runs [block] while [forwarders] are active, then cancels every forwarder.
+ * StateFlow collectors never complete on their own — without this they would
+ * keep the parent job alive after a run returns and leak one collector set
+ * per plan run (F8).
+ * # block 运行期间转发器活跃，返回后全部取消。
+ * # StateFlow collector 自身永不完成，不取消会拖住父 job，每跑一次泄漏一组
+ */
+internal suspend fun withForwarders(
+    forwarders: List<suspend CoroutineScope.() -> Unit>,
+    block: suspend () -> Unit
+) = coroutineScope {
+    val jobs = forwarders.map { forwarder ->
+        launch { forwarder() }
+    }
+    try {
+        block()
+    } finally {
+        jobs.forEach { it.cancel() }
     }
 }
