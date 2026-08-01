@@ -195,8 +195,9 @@ class PlanRepository(private val db: AppDatabase) {
         expectedCompletedSuccesses: Int,
         runningObservedAt: Long?,
         endedAt: Long,
-        webScore: Double,
-        videoScore: Double
+        webScore: Double?,
+        videoScore: Double?,
+        status: String = "succeeded"
     ): Boolean = db.withTransaction {
         val incremented = db.locationTaskDao()
             .incrementSuccessIfCurrent(taskId, expectedCompletedSuccesses)
@@ -207,7 +208,8 @@ class PlanRepository(private val db: AppDatabase) {
             runningObservedAt = runningObservedAt,
             endedAt = endedAt,
             webScore = webScore,
-            videoScore = videoScore
+            videoScore = videoScore,
+            status = status
         )
         // # F5：配额达成 → completed 并入本事务，不留崩溃窗口
         db.locationTaskDao().completeTaskIfQuotaReached(taskId)

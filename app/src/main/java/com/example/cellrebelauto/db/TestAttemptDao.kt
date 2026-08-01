@@ -88,7 +88,7 @@ interface TestAttemptDao {
      * Finalize a succeeded attempt (called inside the finalize transaction, INV-3).
      * # 成功尝试收尾（在 finalize 事务内调用）
      */    @Query(
-        "UPDATE test_attempts SET status = 'succeeded', successOrdinal = :successOrdinal, " +
+        "UPDATE test_attempts SET status = :status, successOrdinal = :successOrdinal, " +
             "runningObservedAt = COALESCE(runningObservedAt, :runningObservedAt), endedAt = :endedAt, " +
             "webBrowsingScore = :webScore, videoStreamingScore = :videoScore WHERE id = :attemptId"
     )
@@ -97,8 +97,9 @@ interface TestAttemptDao {
         successOrdinal: Int,
         runningObservedAt: Long?,
         endedAt: Long,
-        webScore: Double,
-        videoScore: Double
+        webScore: Double?,
+        videoScore: Double?,
+        status: String = "succeeded"
     )
 
     /**
