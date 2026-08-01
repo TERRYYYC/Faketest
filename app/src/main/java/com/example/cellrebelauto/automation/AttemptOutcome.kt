@@ -8,7 +8,9 @@ package com.example.cellrebelauto.automation
 // # 类型化失败原因（终态 schema）
 enum class FailureReason {
     FAKE_GPS_NOT_ACTIVE, FOREGROUND_SWITCH_FAILED, NO_RUNNING_EVIDENCE,
-    CELLREBEL_TIMEOUT, SCORE_PARSE_FAILED, CANCELLED, INTERRUPTED
+    CELLREBEL_TIMEOUT, SCORE_PARSE_FAILED, CANCELLED, INTERRUPTED,
+    // # F1：Start 交互前屏幕上已存在 RUNNING —— 属于上一次运行，拒绝归属
+    PRE_EXISTING_RUN
 }
 
 /**

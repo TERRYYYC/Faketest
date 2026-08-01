@@ -33,9 +33,13 @@ interface CellRebelRunner {
 }
 
 /**
- * Verified CellRebel attempt lifecycle (AC-B2/B3/B5):
+ * Verified CellRebel attempt lifecycle (AC-B2/B3/B5, F1 freshness):
  *
- *   1. click Start (ACTION_CLICK)
+ *   0. pre-click baseline: READY/COMPLETED must be observed first; a RUNNING
+ *      seen before this attempt's Start interaction belongs to a previous run
+ *      and is rejected as PRE_EXISTING_RUN (freshness attribution, F1)
+ *   1. click Start (ACTION_CLICK); false result (button not found) → immediate
+ *      coordinate-tap fallback
  *   2. wait for RUNNING evidence; if none within ~3s of the click, ONE
  *      coordinate-tap fallback; still none within a bounded share of the
  *      timeout → Failure(NO_RUNNING_EVIDENCE)
@@ -88,10 +92,46 @@ class CellRebelAttemptFlow(
         val deadline = anchoredAt + testTimeoutMs
         val runningEvidenceDeadline = anchoredAt + testTimeoutMs / RUNNING_EVIDENCE_TIMEOUT_SHARE
 
-        // # 第 1 步：ACTION_CLICK 启动测试
-        driver.clickStart()
-        val clickedAt = nowMs()
+        // # 第 0 步：pre-click 基线（F1，新鲜 READY/COMPLETED → RUNNING → COMPLETED）
+        // # 一次观察只能归属本次调用执行的动作：Start 交互前已存在的 RUNNING
+        // # 属于上一次运行（如恢复残留），绝不算本次 attempt 的证据
+        var baselineSeen = false
+        while (nowMs() < minOf(deadline, runningEvidenceDeadline)) {
+            val nodes = driver.snapshot()?.flatten()
+            if (nodes != null) {
+                when (detector.classify(nodes)) {
+                    CellRebelScreenState.RUNNING -> return AttemptOutcome.Failure(
+                        reason = FailureReason.PRE_EXISTING_RUN,
+                        detail = "RUNNING observed before this attempt's Start interaction (stale run)",
+                        startedAt = startedAt,
+                        endedAt = nowMs()
+                    )
+                    CellRebelScreenState.READY, CellRebelScreenState.COMPLETED -> {
+                        baselineSeen = true
+                        break
+                    }
+                    CellRebelScreenState.UNKNOWN -> {} // # 屏幕仍在加载，继续等基线
+                }
+            }
+            if (baselineSeen) break
+            delayMs(POLL_INTERVAL_MS)
+        }
+        if (!baselineSeen) {
+            return AttemptOutcome.Failure(
+                reason = FailureReason.NO_RUNNING_EVIDENCE,
+                detail = "Test screen never reached a startable state (no READY/COMPLETED baseline)",
+                startedAt = startedAt,
+                endedAt = nowMs()
+            )
+        }
+
+        // # 第 1 步：ACTION_CLICK 启动测试；返回 false（未找到按钮）→ 立即坐标兜底（AC-B3）
         var fallbackTapDone = false
+        if (!driver.clickStart()) {
+            fallbackTapDone = true
+            driver.dispatchStartTap()
+        }
+        val clickedAt = nowMs()
 
         // # 第 2 步：等待 RUNNING 证据（必要时坐标点按兜底）
         var runningObservedAt: Long? = null

@@ -79,6 +79,7 @@ class CellRebelAttemptFlowTest {
         val clock = VirtualClock()
         val driver = FakeDriver(
             listOf(
+                CellRebelFixtures.ready(),      // t=0: pre-click 基线 READY（F1）
                 CellRebelFixtures.ready(),      // t=0: 第一次 ACTION_CLICK 后仍 READY（点击无效）
                 CellRebelFixtures.ready(),      // t=1500: 仍 READY
                 CellRebelFixtures.running(),    // t=3000: 坐标点按兜底后进入 RUNNING
@@ -107,7 +108,8 @@ class CellRebelAttemptFlowTest {
     @Test
     fun `running persisting past timeout yields CELLREBEL_TIMEOUT`() {
         val clock = VirtualClock()
-        val driver = FakeDriver(listOf(CellRebelFixtures.running()))
+        // # 新鲜基线（F1）：先 READY，本次点击后进入 RUNNING 并一直保持
+        val driver = FakeDriver(listOf(CellRebelFixtures.ready(), CellRebelFixtures.running()))
         val flow = newFlow(clock)
 
         lateinit var outcome: AttemptOutcome
@@ -133,7 +135,8 @@ class CellRebelAttemptFlowTest {
         )
         val driver = FakeDriver(
             listOf(
-                CellRebelFixtures.running(),
+                CellRebelFixtures.ready(),      // # 新鲜基线（F1）：先 READY
+                CellRebelFixtures.running(),    // # 本次点击后进入 RUNNING
                 brokenCompleted,
                 brokenCompleted
             )
@@ -147,6 +150,26 @@ class CellRebelAttemptFlowTest {
 
         assertTrue(outcome is AttemptOutcome.Failure)
         assertEquals(FailureReason.SCORE_PARSE_FAILED, (outcome as AttemptOutcome.Failure).reason)
+    }
+
+    @Test
+    fun `pre-existing RUNNING is rejected as stale and never counted as this attempt`() {
+        // # F1 回归（INV-6 生命周期侧）：恢复后屏幕上残留的旧 RUNNING
+        // # 绝不允许归属为本次 attempt——必须 typed failure，且不得触碰 Start
+        val clock = VirtualClock()
+        val driver = FakeDriver(listOf(CellRebelFixtures.running()))
+        val flow = newFlow(clock)
+
+        lateinit var outcome: AttemptOutcome
+        kotlinx.coroutines.test.runTest {
+            outcome = flow.run(driver, startedAt = 0L, testTimeoutMs = 90_000L)
+        }
+
+        assertTrue(outcome is AttemptOutcome.Failure)
+        assertEquals(FailureReason.PRE_EXISTING_RUN, (outcome as AttemptOutcome.Failure).reason)
+        // # 未发生任何 Start 交互：本次 attempt 什么都没做，什么也不认领
+        assertEquals(0, driver.clickStartCount)
+        assertEquals(0, driver.dispatchTapCount)
     }
 
     @Test
@@ -199,7 +222,8 @@ class CellRebelAttemptFlowTest {
         )
         val driver = FakeDriver(
             listOf(
-                CellRebelFixtures.running(),
+                CellRebelFixtures.ready(),   // # 新鲜基线（F1）：先 READY
+                CellRebelFixtures.running(), // # 本次点击后进入 RUNNING
                 completedA,  // t=0: 第一次完成轮询，分数 A
                 completedB,  // t=1500: 分数变了 → 不采纳
                 completedB   // t=3000: 第二次连续相同 → 采纳
