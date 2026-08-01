@@ -314,7 +314,14 @@ class AutomationEngine(
             throw e // # 重新抛出以正确传播取消
 
         } catch (e: Exception) {
-            // # 不可恢复的错误
+            // # 不可恢复的错误：在飞 attempt 也要终态化（typed，不留孤儿，F7）；
+            // # 终态化本身的失败不掩盖原异常
+            currentAttemptId?.let { attemptId ->
+                runCatching {
+                    planRepository.markAttemptInterruptedIfNonTerminal(attemptId, nowMs())
+                }.onFailure { Log.w(TAG, "failed to terminalize in-flight attempt $attemptId", it) }
+            }
+            currentAttemptId = null
             updateState(AutomationState.ERROR)
             if (runSessionId != 0L) {
                 planRepository.finishSession(runSessionId, "error", nowMs(), _cycleCount.value)

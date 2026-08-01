@@ -266,6 +266,30 @@ class EngineRecoveryTest {
     }
 
     @Test
+    fun `unexpected handler exception terminalizes in flight attempt instead of orphaning it`() = runTest {
+        // # F7 回归：依赖抛异常时，session 标 error 且在飞 attempt 必须终态化（不留 starting 孤儿）
+        val (planId, taskId) = seedPlan(quota = 1)
+        val clock = VirtualClock()
+        val runner = FakeCellRebelRunner(listOf(successTemplate), clock.nowMs)
+        val gps = object : GpsLocationSetter {
+            override suspend fun setLocation(lat: Double, lng: Double): GpsOutcome {
+                throw RuntimeException("bridge exploded")
+            }
+        }
+        buildEngine(planId, runner, gps, clock).run()
+
+        val attempts = db.testAttemptDao().getAttemptsForTask(taskId)
+        assertEquals(1, attempts.size)
+        // # 不允许仍是 starting：必须有定义的终态 + typed 原因
+        assertEquals("interrupted", attempts[0].status)
+        assertEquals("INTERRUPTED", attempts[0].failureReason)
+        assertTrue(attempts[0].endedAt != null)
+
+        val session = db.runSessionDao().getLatest()!!
+        assertEquals("error", session.status)
+    }
+
+    @Test
     fun `finalize that reaches quota marks task completed inside the same transaction`() = runTest {
         // # F5 回归：quota 达成 → completed 必须与收尾同事务，不留 active+满配额 的崩溃窗口
         val (_, taskId) = seedPlan(quota = 1)
