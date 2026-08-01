@@ -8,7 +8,7 @@ created: 2026-07-30
 
 # F001: Prioritized Location Test Plan
 
-> **Status**: in-progress | **Owner**: @kimi | **Reviewer**: @codex-sol | **Priority**: P0
+> **Status**: done (merged `225bdfb`) | **Owner**: @kimi | **Reviewer**: @codex-sol | **Priority**: P0
 
 ## Why
 
@@ -199,7 +199,7 @@ Plan status must be a projection: completed when all task quotas are complete, r
 | # | 问题 | 分类 | 状态 |
 |---|------|------|------|
 | OQ-1 | What internal default test timeout should ship? The global buffer has no default: it is required on first use and then persisted; both settings remain semantically separate. | technical | ⬜ verify during implementation |
-| OQ-2 | Which exact accessibility nodes expose running and Start-enabled state on the target CellRebel build? | technical | ⬜ verify from tree dumps |
+| OQ-2 | Which exact accessibility nodes expose running and Start-enabled state on the target CellRebel build? | technical | ✅ resolved 2026-08-02: real anchors captured on moto g54 (Android 15) — `Measuring web browsing quality…` / `Measuring video streaming quality…` (U+2026, ids `web_progress_text`/`video_progress_text`), Start `enabled` toggles; `Processing results...` absent in this build |
 | OQ-3 | Does the eventual operator list arrive as CSV or require another source adapter? | value | ⬜ CSV is current reversible default |
 
 ## Key Decisions
@@ -224,6 +224,8 @@ Plan status must be a projection: completed when all task quotas are complete, r
 |------|------|
 | 2026-07-30 | Operator clarified prioritized worklist, quota, global buffer, and screen-state semantics; F001 kicked off |
 | 2026-07-31 | Operator approved Design Gate v2.1: Plan → Run → History, with the global buffer required on first use and persisted |
+| 2026-08-01 | PR #2 merged (`225bdfb`): 80/80 unit tests, lint clean, two review rounds (10 + 2 findings) resolved with red→green evidence |
+| 2026-08-02 | Device verification on moto g54 (Android 15): full lifecycle smoke 1/1 success with running-transition audit; acceptance run (10 Kyiv points × 2) started healthy (2/2 first attempts) — operator then waived the remaining run ("当前这个流程没有问题了") and declared F001 done; AC-C4/C5 full-run evidence partially waived by operator |
 
 ## Review Gate
 

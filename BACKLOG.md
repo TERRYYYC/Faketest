@@ -11,4 +11,4 @@ created: 2026-04-01
 
 | ID | Name | Status | Owner | Link |
 |----|------|--------|-------|------|
-| F001 | Prioritized Location Test Plan | in-progress | @kimi | [F001](docs/features/F001-prioritized-location-test-plan.md) |
+| F002 | Fake GPS 精确选点验证 | idea | TBD | [issue #3](https://github.com/TERRYYYC/Faketest/issues/3) |
