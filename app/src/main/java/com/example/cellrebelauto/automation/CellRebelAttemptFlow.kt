@@ -73,15 +73,20 @@ class CellRebelAttemptFlow(
 
     /**
      * Runs the lifecycle from the moment the test screen is shown.
-     * # 从测试页已展示开始执行生命周期（启动/导航由调用方负责）
+     * The timeout budget anchors HERE (lifecycle entry) — [startedAt] is the
+     * engine-side audit timestamp only and never shrinks the budget (F2).
+     * # 从测试页已展示开始执行生命周期（启动/导航由调用方负责）。
+     * # 超时预算锚在进入本生命周期的此刻；startedAt 仅作审计时间戳（F2）
      */
     suspend fun run(
         driver: CellRebelDriver,
         startedAt: Long,
         testTimeoutMs: Long
     ): AttemptOutcome {
-        val deadline = startedAt + testTimeoutMs
-        val runningEvidenceDeadline = startedAt + testTimeoutMs / RUNNING_EVIDENCE_TIMEOUT_SHARE
+        // # 预算锚点：进入验证生命周期的时刻（审计 startedAt 不动）
+        val anchoredAt = nowMs()
+        val deadline = anchoredAt + testTimeoutMs
+        val runningEvidenceDeadline = anchoredAt + testTimeoutMs / RUNNING_EVIDENCE_TIMEOUT_SHARE
 
         // # 第 1 步：ACTION_CLICK 启动测试
         driver.clickStart()

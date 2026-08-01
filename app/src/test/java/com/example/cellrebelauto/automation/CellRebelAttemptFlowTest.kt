@@ -150,6 +150,34 @@ class CellRebelAttemptFlowTest {
     }
 
     @Test
+    fun `timeout budget anchors at lifecycle entry not at engine side attempt start`() {
+        val clock = VirtualClock()
+        // # F2 回归：GPS settle/切换已在引擎侧消耗 60s；审计 startedAt=0 保留，
+        // # 但 CellRebel 的 deadline 必须锚在进入本生命周期的此刻
+        clock.now = 60_000L
+        val driver = FakeDriver(
+            listOf(
+                CellRebelFixtures.ready(),
+                CellRebelFixtures.ready(),
+                CellRebelFixtures.running(),
+                CellRebelFixtures.completed(),
+                CellRebelFixtures.completed()
+            )
+        )
+        val flow = newFlow(clock)
+
+        lateinit var outcome: AttemptOutcome
+        kotlinx.coroutines.test.runTest {
+            outcome = flow.run(driver, startedAt = 0L, testTimeoutMs = 90_000L)
+        }
+
+        // # 完整 90s 预算仍可用 → 正常成功；锚错位置会立刻 NO_RUNNING_EVIDENCE
+        assertTrue(outcome is AttemptOutcome.Success)
+        // # 审计 startedAt 原样保留
+        assertEquals(0L, (outcome as AttemptOutcome.Success).startedAt)
+    }
+
+    @Test
     fun `completion requires two identical consecutive score polls`() {
         val clock = VirtualClock()
         val completedA = CellRebelFixtures.completed() // # 10.00 / 7.50
