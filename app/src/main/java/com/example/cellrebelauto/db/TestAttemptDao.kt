@@ -43,10 +43,12 @@ interface TestAttemptDao {
     )
     suspend fun getAttemptsForPlan(planId: Long): List<TestAttempt>
 
-    // # 最近一次终态尝试（succeeded/failed/interrupted）的 endedAt，用于缓冲投影（INV-5）
+    // # 最近一次终态尝试的 endedAt，用于缓冲投影（INV-5）。
+    // # F3R1-2：终态判定 = endedAt IS NOT NULL（对所有终态免疫，
+    // # 包括 ok_gps_only 与未来的新增终态），不再按 status 枚举
     @Query(
         "SELECT MAX(a.endedAt) FROM test_attempts a INNER JOIN location_tasks t ON a.taskId = t.id " +
-            "WHERE t.planId = :planId AND a.status IN ('succeeded', 'failed', 'interrupted')"
+            "WHERE t.planId = :planId AND a.endedAt IS NOT NULL"
     )
     suspend fun getLatestTerminalAttemptEndedAtForPlan(planId: Long): Long?
 

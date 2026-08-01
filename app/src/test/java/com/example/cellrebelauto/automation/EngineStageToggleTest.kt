@@ -103,13 +103,14 @@ class EngineStageToggleTest {
         gps: GpsLocationSetter,
         clock: VirtualClock,
         toggles: suspend () -> StageToggles,
-        gpsSettleMs: Long = 0L
+        gpsSettleMs: Long = 0L,
+        bufferSeconds: Int = 0
     ) = AutomationEngine(
         planId = planId,
         planRepository = repo,
         cellRebelRunner = runner,
         gpsSetter = gps,
-        bufferGate = BufferGate(0, clock.nowMs),
+        bufferGate = BufferGate(bufferSeconds, clock.nowMs),
         testTimeoutMs = 90_000L,
         gpsSettleMs = gpsSettleMs,
         stageToggles = toggles,
@@ -206,6 +207,25 @@ class EngineStageToggleTest {
         assertEquals(0, runner.calls)
         assertNull(db.runSessionDao().getLatest())
         assertTrue(db.testAttemptDao().getAttemptsForPlan(planId).isEmpty())
+    }
+
+    @Test
+    fun `two ok_gps_only with nonzero buffer makes the second wait the full buffer`() = runTest {
+        // # F3R1-2 回归：ok_gps_only 是终态，必须参与全局缓冲投影（F001 INV-5）
+        val (planId, _) = seedPlan(quota = 2)
+        val clock = VirtualClock()
+        val runner = FakeRunner(clock.nowMs)
+        val gps = FakeGps()
+        buildEngine(
+            planId, runner, gps, clock,
+            toggles = { StageToggles(locationStageEnabled = true, testStageEnabled = false) },
+            gpsSettleMs = 0L,
+            bufferSeconds = 60
+        ).run()
+
+        assertEquals(2, gps.calls)
+        // # 第一次 ok_gps_only 结束后，第二次 attempt 恰好等满 60s 缓冲
+        assertEquals(listOf(60_000L), clock.delays)
     }
 
     @Test
