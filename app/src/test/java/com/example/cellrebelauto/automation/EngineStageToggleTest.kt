@@ -209,6 +209,35 @@ class EngineStageToggleTest {
     }
 
     @Test
+    fun `mid plan both-OFF creates no new attempt, bumps no quota, session fails closed`() = runTest {
+        // # F3R1-1 回归：运行中双关 = 配置错误——不创建 attempt、不涨配额、
+        // # session 以 error 终态收尾（AC-F3-4/KD-F3-3/INV-F3-1）
+        val (planId, taskId) = seedPlan(quota = 2)
+        val clock = VirtualClock()
+        val runner = FakeRunner(clock.nowMs)
+        val gps = FakeGps()
+        buildEngine(planId, runner, gps, clock, toggles = {
+            // # 第一个 attempt 完成后操作员把两个开关都关掉
+            val firstAttemptDone = runner.calls >= 1
+            StageToggles(
+                locationStageEnabled = !firstAttemptDone,
+                testStageEnabled = !firstAttemptDone
+            )
+        }).run()
+
+        // # 恰好 1 个 attempt（第一个成功），第二个从未创建
+        val attempts = db.testAttemptDao().getAttemptsForTask(taskId)
+        assertEquals(1, attempts.size)
+        assertEquals("succeeded", attempts[0].status)
+        assertEquals(1, db.locationTaskDao().getTaskById(taskId)!!.completedSuccesses)
+
+        // # session fail-closed（error 终态），不留 running
+        val session = db.runSessionDao().getLatest()!!
+        assertEquals("error", session.status)
+        assertTrue(session.endedAt != null)
+    }
+
+    @Test
     fun `mid plan toggle change takes effect from the next attempt`() = runTest {
         // # AC-F3-5：运行中改开关，下个 attempt 生效（每次 attempt 重新读取）
         val (planId, taskId) = seedPlan(quota = 2)

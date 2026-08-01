@@ -199,6 +199,14 @@ class AutomationEngine(
 
                 // # F003：每次 attempt 重新读取开关快照（AC-F3-5 中途切换下个 attempt 生效）
                 val toggles = stageToggles()
+                // # F3R1-1：运行中双关 = 配置错误，fail-closed——不创建 attempt、
+                // # 不涨配额，session 以 error 终态收尾（AC-F3-4/KD-F3-3）
+                if (!toggles.locationStageEnabled && !toggles.testStageEnabled) {
+                    log("ERROR: both stages turned OFF mid-plan — failing closed, no new attempt")
+                    updateState(AutomationState.ERROR)
+                    planRepository.finishSession(runSessionId, "error", nowMs(), _cycleCount.value)
+                    return@coroutineScope
+                }
                 // # INV-F3-1：跳过必记录（双关已在启动时拒绝，至多一个标记）
                 val stageNotes = when {
                     !toggles.locationStageEnabled -> "gps_skipped"
