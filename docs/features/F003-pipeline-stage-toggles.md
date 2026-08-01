@@ -8,7 +8,7 @@ created: 2026-08-01
 
 # F003: Pipeline Stage Toggles (per-stage skip switches)
 
-> **Status**: in-progress | **Owner**: @kimi | **Reviewer**: @codex-sol | **Priority**: P1
+> **Status**: done (merged `fdcab16`) | **Owner**: @kimi | **Reviewer**: @codex-sol | **Priority**: P1
 
 ## Why
 
@@ -87,3 +87,4 @@ Rules:
 | 日期 | 事件 |
 |------|------|
 | 2026-08-01 | Operator ordered stage-decoupling toggles at P1 on a new branch; F003 kicked off |
+| 2026-08-02 | PR #4 merged (`fdcab16`): 94/94 tests, lint clean; R1 three state-machine fixes (mid-plan both-off fail-closed, ok_gps_only buffer gating, sweep-before-guard); device spot-check PASS (Location OFF → zero Fake GPS → verified success with `gps_skipped` audit). Reviewer final PASS recorded as PR comment (shared GitHub account blocks APPROVE events; merge body documents this provenance) |
