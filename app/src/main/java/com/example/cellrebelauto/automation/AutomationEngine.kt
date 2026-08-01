@@ -63,8 +63,9 @@ data class LastFailureInfo(
  *   2. selectNext (active-unfinished first, then priority ASC / csvRow ASC)
  *   3. BufferGate wait from persisted last-terminal endedAt (INV-5, after
  *      BOTH success and failure)
- *   4. GPS settle, then Fake GPS setLocation — failure → typed failed attempt,
- *      NO quota consumed (INV-10)
+ *   4. Fake GPS setLocation (skippable, F003) — failure → typed failed attempt,
+ *      NO quota consumed (INV-10); GPS settle after confirmed activation (F3);
+ *      CellRebel stage OFF → ok_gps_only terminal counting quota (F003)
  *   5. runTest — Success finalized in ONE Room transaction (attempt row +
  *      guarded task increment, INV-3); Failure persisted with typed reason (INV-4)
  *   6. quota met → task completed; all complete → session completed

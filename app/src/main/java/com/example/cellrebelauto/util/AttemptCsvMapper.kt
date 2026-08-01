@@ -7,9 +7,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Pure mapping from attempt rows to the 15-column audit CSV (AC-C3).
+ * Pure mapping from attempt rows to the 16-column audit CSV (AC-C3 + F003).
  * No Android deps — JVM-unit-testable; CsvExporter consumes this.
- * # 尝试行 → 15 列审计 CSV 的纯映射。无 Android 依赖，可 JVM 单测
+ * # 尝试行 → 16 列审计 CSV 的纯映射。无 Android 依赖，可 JVM 单测
  *
  * Column semantics:
  * - plan_row: task's 1-based execution-order index within its plan (INV-1)
@@ -62,10 +62,10 @@ object AttemptCsvMapper {
         } + legacyResults.map { legacyToCsvRow(it) }
 
     /**
-     * Maps one legacy v2 test_results row into the 15-column audit shape (C1):
+     * Maps one legacy v2 test_results row into the 16-column audit shape (C1):
      * real values for coords/status/scores/session, started_at = legacy
      * timestamp, every plan-era field blank.
-     * # v2 遗留行 → 15 列审计结构：坐标/状态/分数/会话填真实值，
+     * # v2 遗留行 → 16 列审计结构：坐标/状态/分数/会话填真实值，
      * # started_at = 遗留时间戳，计划时代字段一律留空
      */
     fun legacyToCsvRow(result: TestResult): List<String> =

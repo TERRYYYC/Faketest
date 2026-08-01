@@ -10,8 +10,8 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Pure mapping tests for the 15-column audit CSV (AC-C3).
- * # 15 列审计 CSV 纯映射测试
+ * Pure mapping tests for the 16-column audit CSV (AC-C3 + F003 stage_notes).
+ * # 16 列审计 CSV 纯映射测试
  */
 class AttemptCsvMapperTest {
 
@@ -145,7 +145,7 @@ class AttemptCsvMapperTest {
 
     @Test
     fun `legacy result maps with real values and blank plan fields`() {
-        // # C1：v2 遗留行并入同一份 15 列 CSV——真实值按映射，计划字段留空
+        // # C1：v2 遗留行并入同一份 16 列 CSV——真实值按映射，计划字段留空
         val row = AttemptCsvMapper.legacyToCsvRow(legacyResult())
         assertEquals(AttemptCsvMapper.HEADER.size, row.size)
         assertEquals("", row[0])               // plan_row 空

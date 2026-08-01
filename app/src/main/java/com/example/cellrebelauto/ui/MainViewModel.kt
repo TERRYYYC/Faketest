@@ -285,8 +285,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Exports all attempts to the 15-column audit CSV (AC-C3), chronological.
-     * # 导出全部尝试为 15 列审计 CSV（时间升序）
+     * Exports all attempts to the 16-column audit CSV (AC-C3 + F003 stage_notes), chronological.
+     * # 导出全部尝试为 16 列审计 CSV（时间升序）
      */
     fun exportCsv() {
         viewModelScope.launch {
