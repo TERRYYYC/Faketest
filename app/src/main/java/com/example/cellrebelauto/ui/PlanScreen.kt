@@ -26,6 +26,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -64,6 +65,8 @@ fun PlanScreen(
     onSetGlobalBuffer: (Int) -> Unit,
     onSetTestTimeout: (Int) -> Unit,
     onSetGpsSettle: (Int) -> Unit,
+    onSetLocationStage: (Boolean) -> Unit,
+    onSetTestStage: (Boolean) -> Unit,
     onStartOrResume: () -> Unit,
     onStop: () -> Unit,
     onOpenRun: () -> Unit,
@@ -192,6 +195,15 @@ fun PlanScreen(
                 planState = planState,
                 planConfig = planConfig,
                 onSetGlobalBuffer = onSetGlobalBuffer
+            )
+        }
+
+        // # F003：阶段开关（位置 / CellRebel 测试），Advanced 之上
+        item {
+            StageTogglesSection(
+                planConfig = planConfig,
+                onSetLocationStage = onSetLocationStage,
+                onSetTestStage = onSetTestStage
             )
         }
 
@@ -342,6 +354,80 @@ private fun BufferField(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.fillMaxWidth()
         )
+    }
+}
+
+/**
+ * F003 stage toggles: two independent Switch rows above Advanced. OFF skips
+ * that pipeline stage per attempt; both OFF blocks Start (KD-F3-3).
+ * # F003 阶段开关：两个独立开关行。关闭即每次 attempt 跳过对应阶段；
+ * # 双关时 Start 被拒绝
+ */
+@Composable
+private fun StageTogglesSection(
+    planConfig: PlanConfig,
+    onSetLocationStage: (Boolean) -> Unit,
+    onSetTestStage: (Boolean) -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text("Pipeline stages", fontWeight = FontWeight.Medium)
+            Spacer(modifier = Modifier.height(4.dp))
+
+            // # 位置阶段：Fake GPS 落点 + 激活验证 + 稳定等待
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Location stage (Fake GPS)", fontSize = 14.sp)
+                    Text(
+                        "OFF: skip GPS setup & settle — go straight to CellRebel " +
+                            "(location handled externally; marked gps_skipped)",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                }
+                Switch(
+                    checked = planConfig.locationStageEnabled,
+                    onCheckedChange = onSetLocationStage
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // # CellRebel 测试阶段
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("CellRebel test stage", fontSize = 14.sp)
+                    Text(
+                        "OFF: GPS-verified only — no CellRebel launch " +
+                            "(location-app walk; counts as ok_gps_only, marked test_skipped)",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                }
+                Switch(
+                    checked = planConfig.testStageEnabled,
+                    onCheckedChange = onSetTestStage
+                )
+            }
+
+            // # 双关提示（Start 将被拒绝，KD-F3-3）
+            if (!planConfig.locationStageEnabled && !planConfig.testStageEnabled) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    "Both stages are OFF — Start will be rejected (nothing would run)",
+                    fontSize = 12.sp,
+                    color = MaterialTheme.colorScheme.error
+                )
+            }
+        }
     }
 }
 
