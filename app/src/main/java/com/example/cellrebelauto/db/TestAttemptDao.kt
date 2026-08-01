@@ -25,6 +25,14 @@ interface TestAttemptDao {
     @Insert
     suspend fun insert(attempt: TestAttempt): Long
 
+    // # 全量尝试（导出用，按 id 升序 = 时间顺序）
+    @Query("SELECT * FROM test_attempts ORDER BY id ASC")
+    suspend fun getAllAttempts(): List<TestAttempt>
+
+    // # 观察全量尝试（History 页，最新在前）
+    @Query("SELECT * FROM test_attempts ORDER BY id DESC")
+    fun observeAllAttempts(): Flow<List<TestAttempt>>
+
     @Query("SELECT * FROM test_attempts WHERE taskId = :taskId ORDER BY attemptOrdinal ASC")
     suspend fun getAttemptsForTask(taskId: Long): List<TestAttempt>
 

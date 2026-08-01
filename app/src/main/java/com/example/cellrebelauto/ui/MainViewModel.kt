@@ -15,7 +15,7 @@ import com.example.cellrebelauto.data.PlanConfigStore
 import com.example.cellrebelauto.db.AppDatabase
 import com.example.cellrebelauto.model.AutoConfig
 import com.example.cellrebelauto.model.AutomationState
-import com.example.cellrebelauto.model.TestResult
+import com.example.cellrebelauto.model.plan.AttemptWithTask
 import com.example.cellrebelauto.model.plan.LocationPlan
 import com.example.cellrebelauto.model.plan.LocationTask
 import com.example.cellrebelauto.model.plan.ParseResult
@@ -23,7 +23,6 @@ import com.example.cellrebelauto.model.plan.PlanConfig
 import com.example.cellrebelauto.model.plan.RowError
 import com.example.cellrebelauto.model.plan.WorklistParser
 import com.example.cellrebelauto.repository.PlanRepository
-import com.example.cellrebelauto.repository.TestRepository
 import com.example.cellrebelauto.util.CsvExporter
 import com.example.cellrebelauto.util.DebugExporter
 import kotlinx.coroutines.Dispatchers
@@ -77,7 +76,6 @@ data class PlanUiState(
  */
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val repository = TestRepository(AppDatabase.getInstance(application))
     private val planRepository = PlanRepository(AppDatabase.getInstance(application))
     private val planConfigStore = PlanConfigStore(application)
 
@@ -145,8 +143,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // ---- Data from repository ----
 
-    // # 测试结果列表
-    val results: StateFlow<List<TestResult>> = repository.getAllResults()
+    // # History 页：尝试行联接任务上下文（最新在前，AC-C3）
+    val attempts: StateFlow<List<AttemptWithTask>> = planRepository.observeAttemptsWithTasks()
         .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
 
     // ---- Actions ----
@@ -265,19 +263,23 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         return null
     }
 
+    /**
+     * Exports all attempts to the 15-column audit CSV (AC-C3), chronological.
+     * # 导出全部尝试为 15 列审计 CSV（时间升序）
+     */
     fun exportCsv() {
         viewModelScope.launch {
             try {
-                val allResults = withContext(Dispatchers.IO) {
-                    repository.getAllResultsForExport()
+                val allAttempts = withContext(Dispatchers.IO) {
+                    planRepository.getAllAttemptsWithTasks()
                 }
-                if (allResults.isEmpty()) {
-                    showToast("No results to export")
+                if (allAttempts.isEmpty()) {
+                    showToast("No attempts to export")
                     return@launch
                 }
                 val exporter = CsvExporter(getApplication())
                 val fileName = withContext(Dispatchers.IO) {
-                    exporter.export(allResults)
+                    exporter.exportAttempts(allAttempts)
                 }
                 showToast("Exported: $fileName")
             } catch (e: Exception) {

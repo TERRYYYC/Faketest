@@ -26,6 +26,14 @@ interface LocationTaskDao {
     @Query("SELECT * FROM location_tasks WHERE id = :taskId")
     suspend fun getTaskById(taskId: Long): LocationTask?
 
+    // # 全量任务（History/导出时的 attempt↔task 联接）
+    @Query("SELECT * FROM location_tasks")
+    suspend fun getAllTasks(): List<LocationTask>
+
+    // # 观察全量任务（History 页联接）
+    @Query("SELECT * FROM location_tasks")
+    fun observeAllTasks(): Flow<List<LocationTask>>
+
     @Query("UPDATE location_tasks SET status = :status WHERE id = :taskId")
     suspend fun updateTaskStatus(taskId: Long, status: String)
 

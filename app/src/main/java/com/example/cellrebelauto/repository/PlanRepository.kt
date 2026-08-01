@@ -1,14 +1,17 @@
 package com.example.cellrebelauto.repository
 
 import androidx.room.withTransaction
+import com.example.cellrebelauto.automation.plan.PlanScheduler
 import com.example.cellrebelauto.db.AppDatabase
 import com.example.cellrebelauto.db.TaskAttemptCount
 import com.example.cellrebelauto.model.RunSession
+import com.example.cellrebelauto.model.plan.AttemptWithTask
 import com.example.cellrebelauto.model.plan.LocationPlan
 import com.example.cellrebelauto.model.plan.LocationTask
 import com.example.cellrebelauto.model.plan.TestAttempt
 import com.example.cellrebelauto.model.plan.WorklistRow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 
 /**
  * Plan-level repository (O1–O4 data owner). Wraps the plan/task/attempt/session
@@ -45,6 +48,54 @@ class PlanRepository(private val db: AppDatabase) {
     // # 观察某计划每个任务的尝试总数
     fun observeAttemptCounts(planId: Long): Flow<List<TaskAttemptCount>> =
         db.testAttemptDao().observeAttemptCountsForPlan(planId)
+
+    // ---- History / export (AC-C3, INV-8) ----
+
+    /**
+     * All attempts joined with task plan context, chronological (export).
+     * # 全量尝试联接任务计划上下文，按时间升序（导出用）
+     */
+    suspend fun getAllAttemptsWithTasks(): List<AttemptWithTask> =
+        joinAttemptsWithTasks(
+            db.testAttemptDao().getAllAttempts(),
+            db.locationTaskDao().getAllTasks()
+        )
+
+    /**
+     * Observable attempts joined with task plan context, newest first (History).
+     * # 可观察的尝试联接（History 页，最新在前）
+     */
+    fun observeAttemptsWithTasks(): Flow<List<AttemptWithTask>> =
+        combine(
+            db.testAttemptDao().observeAllAttempts(),
+            db.locationTaskDao().observeAllTasks()
+        ) { attempts, tasks ->
+            joinAttemptsWithTasks(attempts, tasks)
+        }
+
+    // # plan_row = 任务在其计划执行顺序中的 1 起始序号（INV-1 投影）
+    private fun joinAttemptsWithTasks(
+        attempts: List<TestAttempt>,
+        tasks: List<LocationTask>
+    ): List<AttemptWithTask> {
+        val planRowByTaskId = tasks.groupBy { it.planId }
+            .flatMap { (_, planTasks) ->
+                PlanScheduler.executionOrder(planTasks)
+                    .mapIndexed { index, task -> task.id to index + 1 }
+            }
+            .toMap()
+        val taskById = tasks.associateBy { it.id }
+        return attempts.mapNotNull { attempt ->
+            val task = taskById[attempt.taskId] ?: return@mapNotNull null
+            AttemptWithTask(
+                attempt = attempt,
+                planRow = planRowByTaskId[attempt.taskId] ?: 0,
+                csvRow = task.csvRow,
+                priority = task.priority,
+                requiredSuccesses = task.requiredSuccesses
+            )
+        }
+    }
 
     // ---- Import (atomic, AC-A2) ----
 

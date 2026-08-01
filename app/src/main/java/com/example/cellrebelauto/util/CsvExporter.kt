@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import com.example.cellrebelauto.model.TestResult
+import com.example.cellrebelauto.model.plan.AttemptWithTask
 import java.io.OutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -19,6 +20,29 @@ class CsvExporter(private val context: Context) {
 
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
     private val fileNameFormat = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault())
+
+    /**
+     * Exports attempt rows to the 15-column audit CSV (AC-C3). Returns the
+     * file name. Mapping logic lives in AttemptCsvMapper (pure, unit-tested).
+     * # 导出尝试行为 15 列审计 CSV，返回文件名；映射逻辑在 AttemptCsvMapper
+     */
+    fun exportAttempts(attempts: List<AttemptWithTask>): String {
+        val fileName = "cellrebel_attempts_${fileNameFormat.format(Date())}.csv"
+        val stream = createOutputStream(fileName)
+            ?: throw IllegalStateException("Cannot create output file")
+
+        stream.use { out ->
+            val writer = out.bufferedWriter()
+            writer.write(AttemptCsvMapper.HEADER.joinToString(","))
+            writer.newLine()
+            for (row in AttemptCsvMapper.toCsvRows(attempts)) {
+                writer.write(row.joinToString(","))
+                writer.newLine()
+            }
+            writer.flush()
+        }
+        return fileName
+    }
 
     /**
      * Exports results to CSV. Returns the file name.
