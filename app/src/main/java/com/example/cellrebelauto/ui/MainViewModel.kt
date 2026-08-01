@@ -13,7 +13,6 @@ import com.example.cellrebelauto.automation.LastFailureInfo
 import com.example.cellrebelauto.automation.plan.PlanScheduler
 import com.example.cellrebelauto.data.PlanConfigStore
 import com.example.cellrebelauto.db.AppDatabase
-import com.example.cellrebelauto.model.AutoConfig
 import com.example.cellrebelauto.model.AutomationState
 import com.example.cellrebelauto.model.plan.AttemptWithTask
 import com.example.cellrebelauto.model.plan.LocationPlan
@@ -78,11 +77,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val planRepository = PlanRepository(AppDatabase.getInstance(application))
     private val planConfigStore = PlanConfigStore(application)
-
-    // ---- Legacy random-mode config (removed in Task 13) ----
-
-    private val _config = MutableStateFlow(AutoConfig())
-    val config: StateFlow<AutoConfig> = _config
 
     // ---- Navigation ----
 
@@ -151,11 +145,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun navigateTo(screen: Screen) {
         _currentScreen.value = screen
-    }
-
-    fun updateConfig(newConfig: AutoConfig) {
-        _config.value = newConfig
-        _currentScreen.value = Screen.RUN
     }
 
     /**
@@ -353,6 +342,5 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 enum class Screen {
     PLAN,     // # 位置计划页（F001 首页）
     RUN,      // # 运行仪表盘（由旧 CONTROL 演进）
-    CONFIG,   // # 旧随机模式配置页（Task 13 删除）
     HISTORY   // # 历史记录页面
 }

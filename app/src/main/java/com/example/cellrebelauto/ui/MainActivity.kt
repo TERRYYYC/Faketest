@@ -32,7 +32,6 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun MainApp(vm: MainViewModel = viewModel()) {
     val currentScreen by vm.currentScreen.collectAsState()
-    val config by vm.config.collectAsState()
     val isRunning by vm.isRunning.collectAsState()
     val currentState by vm.currentState.collectAsState()
     val cycleCount by vm.cycleCount.collectAsState()
@@ -85,14 +84,6 @@ fun MainApp(vm: MainViewModel = viewModel()) {
                 // # 调试功能
                 onExportLogs = { vm.exportLogs() },
                 onDumpA11yTree = { vm.dumpAccessibilityTree() }
-            )
-        }
-
-        Screen.CONFIG -> {
-            ConfigScreen(
-                currentConfig = config,
-                onSave = { vm.updateConfig(it) },
-                onBack = { vm.navigateTo(Screen.PLAN) }
             )
         }
 
