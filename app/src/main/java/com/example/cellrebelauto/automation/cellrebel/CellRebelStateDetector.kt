@@ -35,8 +35,12 @@ class CellRebelStateDetector {
 
     companion object {
         // # 运行中覆盖层标记文本
+        // # 真机锚点（2026-08-02 moto g54 device-smoke）：此版本无 "Processing results"，
+        // # web/video 阶段分别为 "Measuring web browsing quality…" / "Measuring video
+        // # streaming quality…"（U+2026），按子串匹配兼容截图版文案
         private val RUNNING_MARKERS = listOf(
             "Processing results",
+            "Measuring web browsing quality",
             "Measuring video streaming quality"
         )
         // # 分数标签

@@ -59,6 +59,28 @@ class CellRebelStateDetectorTest {
     }
 
     @Test
+    fun `real device web progress marker alone classifies as RUNNING`() {
+        // # 真机证据（moto g54, 2026-08-02 device-smoke）：此版本 CellRebel 没有
+        // # "Processing results..."，web 阶段标记是 "Measuring web browsing quality…"
+        // #（U+2026 省略号，resource-id web_progress_text）。仅该标记 + Start enabled 也必须判 RUNNING
+        val nodes = listOf(
+            ScreenNode(
+                text = "Measuring web browsing quality…",
+                contentDescription = null,
+                className = "android.widget.TextView",
+                clickable = false, enabled = true
+            ),
+            ScreenNode(
+                text = "Start",
+                contentDescription = null,
+                className = "android.widget.Button",
+                clickable = true, enabled = true
+            )
+        )
+        assertEquals(CellRebelScreenState.RUNNING, detector.classify(nodes))
+    }
+
+    @Test
     fun `extractScores maps rating words to numeric fallback scores`() {
         // # 只有评级词、没有数值时也要能解析
         val nodes = ScreenNode(
