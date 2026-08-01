@@ -47,3 +47,34 @@ fun verifyFakeGpsActivation(nodes: List<ScreenNode>): GpsOutcome =
             detail = "\"Stop Fake GPS\" button never appeared after the start sequence"
         )
     }
+
+/**
+ * Freshness attribution for activation (F4): Active only when THIS call's
+ * sequence was confirmed — a stale Stop button from a previous spoofing
+ * session is never evidence for the new location.
+ * # 激活的新鲜度归属（F4）：只有本次调用的序列被确认才返回 Active；
+ * # 上一次伪造残留的旧 Stop 按钮绝不作为新地点的激活证据
+ *
+ * @param previousSpoofingStopped true = 进入时无旧伪造，或旧伪造已被确认停止
+ * @param startSequenceConfirmed true = 本次 Start 点击序列观察到了 Stop 出现
+ * @param finalNodes 流程结束时的终态快照
+ */
+fun resolveActivationOutcome(
+    previousSpoofingStopped: Boolean,
+    startSequenceConfirmed: Boolean,
+    finalNodes: List<ScreenNode>
+): GpsOutcome {
+    if (!previousSpoofingStopped) {
+        return GpsOutcome.Failed(
+            reason = FailureReason.FAKE_GPS_NOT_ACTIVE,
+            detail = "Previous spoofing could not be stopped — any Stop button is stale"
+        )
+    }
+    if (!startSequenceConfirmed) {
+        return GpsOutcome.Failed(
+            reason = FailureReason.FAKE_GPS_NOT_ACTIVE,
+            detail = "This call's start sequence did not confirm activation"
+        )
+    }
+    return verifyFakeGpsActivation(finalNodes)
+}
