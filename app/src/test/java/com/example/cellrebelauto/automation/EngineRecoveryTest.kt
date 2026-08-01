@@ -266,6 +266,40 @@ class EngineRecoveryTest {
     }
 
     @Test
+    fun `gps settle happens after activation is confirmed and before cellrebel launch`() = runTest {
+        // # F3 回归：批准的旅程是 Setting GPS → GPS settling → Testing；
+        // # settle 在 setLocation 之前等于等旧坐标，新坐标激活后必须等稳定再测
+        val (planId, _) = seedPlan(quota = 1, bufferSeconds = 0)
+        val clock = VirtualClock()
+        val events = mutableListOf<String>()
+        val gps = object : GpsLocationSetter {
+            override suspend fun setLocation(lat: Double, lng: Double): GpsOutcome {
+                events.add("gps-set")
+                return GpsOutcome.Active
+            }
+        }
+        val runner = object : CellRebelRunner {
+            override suspend fun runTest(startedAt: Long, testTimeoutMs: Long): AttemptOutcome {
+                events.add("run-test")
+                return successTemplate.copy(startedAt = startedAt, endedAt = clock.nowMs())
+            }
+        }
+        AutomationEngine(
+            planId = planId,
+            planRepository = repo,
+            cellRebelRunner = runner,
+            gpsSetter = gps,
+            bufferGate = BufferGate(0, clock.nowMs),
+            testTimeoutMs = 90_000L,
+            gpsSettleMs = 5_000L,
+            nowMs = clock.nowMs,
+            delayMs = { ms -> events.add("settle-$ms"); clock.delayMs(ms) }
+        ).run()
+
+        assertEquals(listOf("gps-set", "settle-5000", "run-test"), events)
+    }
+
+    @Test
     fun `unexpected handler exception terminalizes in flight attempt instead of orphaning it`() = runTest {
         // # F7 回归：依赖抛异常时，session 标 error 且在飞 attempt 必须终态化（不留 starting 孤儿）
         val (planId, taskId) = seedPlan(quota = 1)

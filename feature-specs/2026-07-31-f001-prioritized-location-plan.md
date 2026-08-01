@@ -376,7 +376,7 @@ class CellRebelStateDetector {
 ## Task 9: Engine integration + recovery sweep (INV-3/8/9; AC-C2 data half)
 
 **Files:**
-- Modify: `automation/AutomationEngine.kt` — replace random-point loop with plan loop: load active plan → recovery sweep (mark non-terminal attempts `interrupted`, dead `running` sessions `interrupted`) → select task → BufferGate wait → GPS → settle → attempt → finalize in ONE Room transaction (attempt row + conditional task increment) → repeat.
+- Modify: `automation/AutomationEngine.kt` — replace random-point loop with plan loop: load active plan → recovery sweep (mark non-terminal attempts `interrupted`, dead `running` sessions `interrupted`) → select task → BufferGate wait → GPS setLocation (on failure: typed failed attempt, no quota) → GPS settle after confirmed activation → attempt → finalize in ONE Room transaction (attempt row + conditional task increment) → repeat.  *(Review round 1 / F3: made the journey order explicit — Setting GPS → GPS settling → Testing per design doc v2.1; the terse "GPS → settle" phrasing was read in reverse during implementation, which put settle before setLocation.)*
 - Modify: `automation/AutomationService.kt` — start API takes planId, not AutoConfig.
 - Test: `app/src/test/java/com/example/cellrebelauto/automation/EngineRecoveryTest.kt` (Room + fake handlers): crash-window scenario, idempotent finalize, failure-then-retry same location.
 

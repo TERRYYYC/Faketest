@@ -217,14 +217,6 @@ class AutomationEngine(
                     attemptOrdinal = attemptOrdinal
                 )
 
-                // # GPS 稳定等待
-                if (gpsSettleMs > 0) {
-                    updateState(AutomationState.WAITING_INTERVAL)
-                    log("Waiting ${gpsSettleMs / 1000}s for GPS to settle...")
-                    delayMs(gpsSettleMs)
-                    ensureActive()
-                }
-
                 // ==================== Fake GPS（失败即停，INV-10） ====================
                 updateState(AutomationState.LAUNCHING_FAKE_GPS)
                 val gpsOutcome = gpsSetter.setLocation(task.latitude, task.longitude)
@@ -238,6 +230,15 @@ class AutomationEngine(
                     returnToSelf()
                     tasks = planRepository.getTasks(planId)
                     continue
+                }
+
+                // # GPS 稳定等待（F3）：锚在新坐标激活确认之后、CellRebel 启动之前，
+                // # 旅程顺序 = Setting GPS → GPS settling → Testing
+                if (gpsSettleMs > 0) {
+                    updateState(AutomationState.WAITING_INTERVAL)
+                    log("Waiting ${gpsSettleMs / 1000}s for GPS to settle...")
+                    delayMs(gpsSettleMs)
+                    ensureActive()
                 }
 
                 // ==================== CellRebel verified attempt ====================
