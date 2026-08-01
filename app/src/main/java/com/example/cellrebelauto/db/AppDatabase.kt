@@ -14,11 +14,11 @@ import com.example.cellrebelauto.model.plan.TestAttempt
 
 /**
  * Room database singleton.
- * # Room 数据库单例，版本 3（F001 位置测试计划）
+ * # Room 数据库单例，版本 4（F003 阶段开关审计列）
  */
 @Database(
     entities = [TestResult::class, RunSession::class, LocationPlan::class, LocationTask::class, TestAttempt::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -90,6 +90,17 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v3 -> v4 (F003): test_attempts gains stageNotes (audit skip marks).
+         * Additive only — no data touched.
+         * # v3 到 v4（F003）：test_attempts 增加 stageNotes（跳过审计标记），纯增量
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE test_attempts ADD COLUMN stageNotes TEXT")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -98,7 +109,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "cellrebel_auto.db"
                 )
                     // # 非破坏性迁移：保留历史数据
-                    .addMigrations(MIGRATION_2_3)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
                     .build()
                     .also { INSTANCE = it }
             }

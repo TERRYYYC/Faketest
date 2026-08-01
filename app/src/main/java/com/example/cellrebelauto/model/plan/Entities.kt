@@ -96,5 +96,7 @@ data class TestAttempt(
     val webBrowsingScore: Double?,
     val videoStreamingScore: Double?,
     val latitude: Double,
-    val longitude: Double
+    val longitude: Double,
+    // # F003：阶段跳过审计标记（gps_skipped / test_skipped / null=无跳过）
+    val stageNotes: String? = null
 )
