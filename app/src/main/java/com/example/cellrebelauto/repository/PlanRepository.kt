@@ -143,18 +143,20 @@ class PlanRepository(private val db: AppDatabase) {
 
     suspend fun markTaskActive(taskId: Long) = db.locationTaskDao().updateTaskStatus(taskId, "active")
 
-    suspend fun markTaskCompleted(taskId: Long) = db.locationTaskDao().markTaskCompleted(taskId)
+    // # 恢复归一化：满配额但状态未翻转的历史崩溃窗口任务 → completed（F5 兜底）
+    suspend fun normalizeQuotaCompletedTasks(): Int =
+        db.locationTaskDao().normalizeQuotaCompletedTasks()
 
     // ---- Attempt lifecycle ----
 
     suspend fun insertAttempt(attempt: TestAttempt): Long = db.testAttemptDao().insert(attempt)
 
     /**
-     * Atomic success finalization (INV-3): guarded task increment + attempt row
-     * update in ONE Room transaction. Returns false when the expected
-     * completedSuccesses is stale (re-run safety).
-     * # 原子成功收尾（INV-3）：守卫式自增 + 尝试行更新在同一事务内；
-     * # 期望值过期时返回 false（重跑安全）
+     * Atomic success finalization (INV-3 + F5): guarded task increment, attempt
+     * row update, AND quota-reached task completion in ONE Room transaction.
+     * Returns false when the expected completedSuccesses is stale (re-run safety).
+     * # 原子成功收尾：守卫式自增 + 尝试行更新 + 配额达成即 completed，
+     * # 同一事务；期望值过期时返回 false（重跑安全）
      */
     suspend fun finalizeAttemptSuccess(
         attemptId: Long,
@@ -176,6 +178,8 @@ class PlanRepository(private val db: AppDatabase) {
             webScore = webScore,
             videoScore = videoScore
         )
+        // # F5：配额达成 → completed 并入本事务，不留崩溃窗口
+        db.locationTaskDao().completeTaskIfQuotaReached(taskId)
         true
     }
 

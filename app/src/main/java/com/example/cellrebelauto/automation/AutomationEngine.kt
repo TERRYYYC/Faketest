@@ -133,6 +133,11 @@ class AutomationEngine(
             if (sweptAttempts > 0 || sweptSessions > 0) {
                 log("Recovery sweep: $sweptAttempts attempt(s) + $sweptSessions session(s) marked interrupted")
             }
+            // # F5 兜底：满配额但状态未翻转的历史崩溃窗口任务 → completed
+            val normalized = planRepository.normalizeQuotaCompletedTasks()
+            if (normalized > 0) {
+                log("Recovery sweep: $normalized quota-full task(s) normalized to completed")
+            }
 
             val plan = planRepository.getPlan(planId)
             if (plan == null) {
@@ -264,8 +269,8 @@ class AutomationEngine(
                             // # 刷新 Run 页状态卡上的成功计数
                             _currentTask.value = _currentTask.value
                                 ?.copy(completedSuccesses = updated.completedSuccesses)
-                            if (PlanScheduler.isQuotaComplete(updated)) {
-                                planRepository.markTaskCompleted(task.id)
+                            // # F5：配额达成 → completed 已在 finalize 事务内完成
+                            if (updated.status == "completed") {
                                 log("Location csvRow=${task.csvRow} quota complete ✔")
                             }
                         }
@@ -284,10 +289,18 @@ class AutomationEngine(
                 tasks = planRepository.getTasks(planId)
             }
 
-            // # 全部完成
-            updateState(AutomationState.DONE)
-            planRepository.finishSession(runSessionId, "completed", nowMs(), _cycleCount.value)
-            log("=== Plan completed: ${_cycleCount.value} attempts ===")
+            // # 只有计划投影真正 complete 才算成功完成（F5：selectNext == null
+            // # 但投影未完成 = 状态不一致，绝不记 completed）
+            tasks = planRepository.getTasks(planId)
+            if (PlanScheduler.isPlanComplete(tasks)) {
+                updateState(AutomationState.DONE)
+                planRepository.finishSession(runSessionId, "completed", nowMs(), _cycleCount.value)
+                log("=== Plan completed: ${_cycleCount.value} attempts ===")
+            } else {
+                updateState(AutomationState.ERROR)
+                planRepository.finishSession(runSessionId, "error", nowMs(), _cycleCount.value)
+                log("=== ERROR: no selectable task but plan projection is NOT complete ===")
+            }
 
         } catch (e: CancellationException) {
             // # 停止/取消：在途尝试标记 interrupted，会话 stopped

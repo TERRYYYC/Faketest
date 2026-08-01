@@ -50,4 +50,20 @@ interface LocationTaskDao {
 
     @Query("UPDATE location_tasks SET status = 'completed' WHERE id = :taskId")
     suspend fun markTaskCompleted(taskId: Long)
+
+    /**
+     * Quota-reached completion, called INSIDE the success finalize transaction
+     * so the task never lingers active with a full quota (F5 crash window).
+     * # 配额达成即完成：在成功收尾事务内调用，杜绝 active+满配额 的崩溃窗口
+     */
+    @Query("UPDATE location_tasks SET status = 'completed' WHERE id = :taskId AND completedSuccesses >= requiredSuccesses")
+    suspend fun completeTaskIfQuotaReached(taskId: Long): Int
+
+    /**
+     * Recovery normalization for the pre-fix crash window: any task whose quota
+     * is already full but status was never flipped gets completed on plan load.
+     * # 恢复归一化：兜底修复历史崩溃窗口留下的满配额非 completed 任务
+     */
+    @Query("UPDATE location_tasks SET status = 'completed' WHERE completedSuccesses >= requiredSuccesses AND status != 'completed'")
+    suspend fun normalizeQuotaCompletedTasks(): Int
 }

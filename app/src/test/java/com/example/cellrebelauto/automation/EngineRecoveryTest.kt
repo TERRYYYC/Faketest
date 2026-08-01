@@ -264,4 +264,60 @@ class EngineRecoveryTest {
         // # INV-5：第一次成功结束后，第二次尝试恰好等了完整缓冲 60s
         assertEquals(listOf(60_000L), clock.delays)
     }
+
+    @Test
+    fun `finalize that reaches quota marks task completed inside the same transaction`() = runTest {
+        // # F5 回归：quota 达成 → completed 必须与收尾同事务，不留 active+满配额 的崩溃窗口
+        val (_, taskId) = seedPlan(quota = 1)
+        val sessionId = db.runSessionDao().insert(RunSession(startedAt = 500L, planId = null))
+        val attemptId = db.testAttemptDao().insert(
+            TestAttempt(
+                taskId = taskId, runSessionId = sessionId, attemptOrdinal = 1,
+                successOrdinal = null, startedAt = 600L, runningObservedAt = 650L,
+                endedAt = null, status = "running", failureReason = null,
+                webBrowsingScore = null, videoStreamingScore = null,
+                latitude = 39.9, longitude = 116.4
+            )
+        )
+
+        val finalized = repo.finalizeAttemptSuccess(
+            attemptId = attemptId, taskId = taskId, expectedCompletedSuccesses = 0,
+            runningObservedAt = 650L, endedAt = 700L, webScore = 8.0, videoScore = 7.0
+        )
+
+        assertTrue(finalized)
+        val task = db.locationTaskDao().getTaskById(taskId)!!
+        assertEquals(1, task.completedSuccesses)
+        // # 关键断言：不需要第二次写，任务在同一事务内已 completed
+        assertEquals("completed", task.status)
+    }
+
+    @Test
+    fun `recovery normalizes quota full active task so a completed plan is truly completable`() = runTest {
+        // # F5 精确崩溃窗口：上次进程在 quota 自增后、markTaskCompleted 前死亡
+        val planId = db.planDao().insertPlanWithTasks(
+            LocationPlan(
+                sourceFileName = "sites.csv", importedAt = 1000L,
+                globalBufferSeconds = 60, totalRows = 1, totalRequiredSuccesses = 1
+            ),
+            listOf(
+                LocationTask(
+                    planId = 0, csvRow = 1, longitude = 116.4, latitude = 39.9,
+                    priority = 1, requiredSuccesses = 1,
+                    completedSuccesses = 1, status = "active" // # 满配额但仍 active
+                )
+            )
+        )
+        val clock = VirtualClock()
+        val runner = FakeCellRebelRunner(listOf(successTemplate), clock.nowMs)
+        val gps = FakeGpsSetter(listOf(GpsOutcome.Active))
+        buildEngine(planId, runner, gps, clock).run()
+
+        // # 恢复归一化：任务被识别为已完成，计划真正完成，会话 completed，无新尝试
+        val task = db.locationTaskDao().getTasksForPlan(planId).first()
+        assertEquals("completed", task.status)
+        assertEquals(0, runner.calls)
+        val session = db.runSessionDao().getLatest()!!
+        assertEquals("completed", session.status)
+    }
 }
