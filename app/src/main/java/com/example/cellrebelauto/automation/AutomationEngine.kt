@@ -130,16 +130,9 @@ class AutomationEngine(
      */
     suspend fun run() = coroutineScope {
         try {
-            // ==================== Step 0: both-stages-off guard (AC-F3-4) ====================
-            // # 双关 = 配置错误（KD-F3-3）：明确拒绝，不创建会话
-            val initialToggles = stageToggles()
-            if (!initialToggles.locationStageEnabled && !initialToggles.testStageEnabled) {
-                log("ERROR: both stages are OFF — nothing would be executed. Enable at least one stage.")
-                updateState(AutomationState.ERROR)
-                return@coroutineScope
-            }
-
-            // ==================== Step 1: recovery sweep FIRST (INV-9) ====================
+            // ==================== Step 0: recovery sweep FIRST (INV-9, F3R1-3) ====================
+            // # 清扫永远最先跑：即使随后 both-OFF guard 拒绝启动，
+            // # 崩溃残留也必须被终态化
             val sweptAttempts = planRepository.markNonTerminalInterrupted(nowMs())
             val sweptSessions = planRepository.markStaleSessionsInterrupted(nowMs())
             if (sweptAttempts > 0 || sweptSessions > 0) {
@@ -149,6 +142,15 @@ class AutomationEngine(
             val normalized = planRepository.normalizeQuotaCompletedTasks()
             if (normalized > 0) {
                 log("Recovery sweep: $normalized quota-full task(s) normalized to completed")
+            }
+
+            // ==================== Step 1: both-stages-off guard (AC-F3-4) ====================
+            // # 双关 = 配置错误（KD-F3-3）：明确拒绝，不创建会话
+            val initialToggles = stageToggles()
+            if (!initialToggles.locationStageEnabled && !initialToggles.testStageEnabled) {
+                log("ERROR: both stages are OFF — nothing would be executed. Enable at least one stage.")
+                updateState(AutomationState.ERROR)
+                return@coroutineScope
             }
 
             val plan = planRepository.getPlan(planId)

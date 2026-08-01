@@ -210,6 +210,43 @@ class EngineStageToggleTest {
     }
 
     @Test
+    fun `stale attempt and session plus persisted both-OFF resume sweeps first and creates no new session`() = runTest {
+        // # F3R1-3 回归：持久化双关 + 崩溃残留时，recovery sweep 必须先于
+        // # both-OFF guard 执行（F001 INV-9），guard 拒绝后不新建 session
+        val (planId, taskId) = seedPlan(quota = 2)
+        // # 崩溃残留：running attempt + running session
+        val staleSessionId = db.runSessionDao().insert(
+            com.example.cellrebelauto.model.RunSession(startedAt = 500L, planId = planId)
+        )
+        db.testAttemptDao().insert(
+            com.example.cellrebelauto.model.plan.TestAttempt(
+                taskId = taskId, runSessionId = staleSessionId, attemptOrdinal = 1,
+                successOrdinal = null, startedAt = 600L, runningObservedAt = 650L,
+                endedAt = null, status = "running", failureReason = null,
+                webBrowsingScore = null, videoStreamingScore = null,
+                latitude = 39.9, longitude = 116.4
+            )
+        )
+        val clock = VirtualClock()
+        val runner = FakeRunner(clock.nowMs)
+        val gps = FakeGps()
+        buildEngine(planId, runner, gps, clock, toggles = {
+            StageToggles(locationStageEnabled = false, testStageEnabled = false)
+        }).run()
+
+        // # sweep 已执行：残留行被终态化
+        val staleAttempt = db.testAttemptDao().getAttemptsForTask(taskId).single()
+        assertEquals("interrupted", staleAttempt.status)
+        assertEquals(650L, staleAttempt.runningObservedAt)
+        assertEquals("interrupted", db.runSessionDao().getById(staleSessionId)!!.status)
+
+        // # guard 拒绝：没有新建 session（仍只有残留那一个），没有新 attempt
+        assertEquals(staleSessionId, db.runSessionDao().getLatest()!!.id)
+        assertEquals(0, runner.calls)
+        assertEquals(0, gps.calls)
+    }
+
+    @Test
     fun `two ok_gps_only with nonzero buffer makes the second wait the full buffer`() = runTest {
         // # F3R1-2 回归：ok_gps_only 是终态，必须参与全局缓冲投影（F001 INV-5）
         val (planId, _) = seedPlan(quota = 2)
