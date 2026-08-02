@@ -1,5 +1,7 @@
 package com.example.cellrebelauto.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -38,10 +40,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
 import com.example.cellrebelauto.model.plan.LocationTask
 import com.example.cellrebelauto.model.plan.PlanConfig
 import com.example.cellrebelauto.model.plan.RowError
@@ -65,9 +69,11 @@ fun PlanScreen(
     onSetGlobalBuffer: (Int) -> Unit,
     onSetTestTimeout: (Int) -> Unit,
     onSetGpsSettle: (Int) -> Unit,
+    onSetLocationTolerance: (Double) -> Unit,
     onSetLocationStage: (Boolean) -> Unit,
     onSetTestStage: (Boolean) -> Unit,
     onStartOrResume: () -> Unit,
+    onLocationPermissionNotice: (String) -> Unit,
     onStop: () -> Unit,
     onOpenRun: () -> Unit,
     onOpenHistory: () -> Unit
@@ -77,6 +83,38 @@ fun PlanScreen(
         ActivityResultContracts.OpenDocument()
     ) { uri ->
         if (uri != null) onImport(uri)
+    }
+
+    // # F002：Start 前运行时定位权限流（spec：未授权则触发请求）。
+    // # 已授 FINE → 直接启动；否则请求 FINE+COARSE；引擎 preflight 仍是兜底
+    val context = LocalContext.current
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        when {
+            grants[Manifest.permission.ACCESS_FINE_LOCATION] == true -> onStartOrResume()
+            grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true ->
+                onLocationPermissionNotice(
+                    "Precise (fine) location is required — only approximate location was granted"
+                )
+            else ->
+                onLocationPermissionNotice("Location permission is required to run a plan")
+        }
+    }
+    val startWithPermissionCheck = {
+        if (ContextCompat.checkSelfPermission(
+                context, Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+        ) {
+            onStartOrResume()
+        } else {
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                )
+            )
+        }
     }
 
     LazyColumn(
@@ -207,12 +245,13 @@ fun PlanScreen(
             )
         }
 
-        // # 高级参数（折叠）：test timeout / GPS settle，有内部默认
+        // # 高级参数（折叠）：test timeout / GPS settle / 位置容差，有内部默认
         item {
             AdvancedSection(
                 planConfig = planConfig,
                 onSetTestTimeout = onSetTestTimeout,
-                onSetGpsSettle = onSetGpsSettle
+                onSetGpsSettle = onSetGpsSettle,
+                onSetLocationTolerance = onSetLocationTolerance
             )
         }
 
@@ -263,7 +302,7 @@ fun PlanScreen(
                 // # 计划未启动 → Start
                 planState.plan != null && !planState.isStarted -> {
                     Button(
-                        onClick = onStartOrResume,
+                        onClick = startWithPermissionCheck,
                         modifier = Modifier.fillMaxWidth(),
                         enabled = isServiceConnected
                     ) {
@@ -273,7 +312,7 @@ fun PlanScreen(
                 // # 有未完成但已暂停的计划 → Resume（INV-9 恢复入口）
                 planState.isUnfinished -> {
                     Button(
-                        onClick = onStartOrResume,
+                        onClick = startWithPermissionCheck,
                         modifier = Modifier.fillMaxWidth(),
                         enabled = isServiceConnected
                     ) {
@@ -432,15 +471,16 @@ private fun StageTogglesSection(
 }
 
 /**
- * Collapsible Advanced section: test timeout + GPS settle (independent
- * internal-default fields, AC-B5).
- * # 可折叠高级区：测试超时 + GPS 稳定等待（独立字段、独立持久化）
+ * Collapsible Advanced section: test timeout + GPS settle + location tolerance
+ * (independent internal-default fields, AC-B5 / F002 OQ-F2-1).
+ * # 可折叠高级区：测试超时 + GPS 稳定等待 + 位置容差（独立字段、独立持久化）
  */
 @Composable
 private fun AdvancedSection(
     planConfig: PlanConfig,
     onSetTestTimeout: (Int) -> Unit,
-    onSetGpsSettle: (Int) -> Unit
+    onSetGpsSettle: (Int) -> Unit,
+    onSetLocationTolerance: (Double) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
 
@@ -470,6 +510,13 @@ private fun AdvancedSection(
                     value = planConfig.gpsSettleSeconds,
                     onSave = onSetGpsSettle
                 )
+                Spacer(modifier = Modifier.height(8.dp))
+                // # F002：位置验证容差（per-attempt 快照，导出回显实际使用值）
+                AdvancedDoubleField(
+                    label = "Location tolerance (m)",
+                    value = planConfig.locationToleranceMeters,
+                    onSave = onSetLocationTolerance
+                )
             }
         }
     }
@@ -494,6 +541,29 @@ private fun AdvancedIntField(
         },
         label = { Text(label) },
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+// # 高级区小数输入框（F002 容差）：本地编辑态 + 持久化值回填
+@Composable
+private fun AdvancedDoubleField(
+    label: String,
+    value: Double,
+    onSave: (Double) -> Unit
+) {
+    var text by remember { mutableStateOf("") }
+    LaunchedEffect(value) {
+        text = value.toString()
+    }
+    OutlinedTextField(
+        value = text,
+        onValueChange = { newValue ->
+            text = newValue
+            newValue.toDoubleOrNull()?.let { if (it >= 0) onSave(it) }
+        },
+        label = { Text(label) },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         modifier = Modifier.fillMaxWidth()
     )
 }

@@ -60,6 +60,9 @@ class AndroidLocationFixSampler(
         const val SAMPLE_TIMEOUT_MS = 15_000L
     }
 
+    // # Lint MissingPermission 抑制：调用方 LocationGate.verify 在采样前
+    // # 已做 FINE 权限预检（引擎 pre-start preflight 双保险），此处必已授权
+    @android.annotation.SuppressLint("MissingPermission")
     override suspend fun sampleFix(): SampleResult {
         val locationManager =
             context.getSystemService(Context.LOCATION_SERVICE) as LocationManager

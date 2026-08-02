@@ -180,6 +180,25 @@ private fun AttemptCard(item: AttemptWithTask) {
                 )
             }
 
+            // # F002 AC-F2-3：位置验证审计行（闸门跑过即有 verifiedAt）
+            if (a.verifiedAt != null) {
+                val auditText = buildList {
+                    a.locationErrorMeters?.let { add("±%.1fm".format(it)) }
+                    a.fixIsMock?.let { add("mock=$it") }
+                    a.fixAccuracyMeters?.let { add("acc=%.1fm".format(it)) }
+                    a.toleranceMetersUsed?.let { add("tol=%.0fm".format(it)) }
+                }.joinToString(" · ")
+                val coordsText = if (a.actualLatitude != null && a.actualLongitude != null)
+                    " @ %.4f, %.4f".format(a.actualLongitude, a.actualLatitude)
+                else
+                    ""
+                Text(
+                    "loc $auditText$coordsText",
+                    fontSize = 12.sp,
+                    color = Color.Gray
+                )
+            }
+
             // # 起止时间戳与时长
             val startText = dateFormat.format(Date(a.startedAt))
             val endText = a.endedAt?.let { timeFormat.format(Date(it)) } ?: "—"

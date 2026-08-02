@@ -208,6 +208,20 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { planConfigStore.setTestStageEnabled(enabled) }
     }
 
+    // # F002：位置验证容差（米，OQ-F2-1 per-attempt 快照读取）
+    fun setLocationToleranceMeters(meters: Double) {
+        viewModelScope.launch { planConfigStore.setLocationToleranceMeters(meters) }
+    }
+
+    /**
+     * Surfaces a location-permission notice through the same channel as import
+     * notices (F002 Start flow); no persistence.
+     * # F002：定位权限提示，复用 importNotice 通道展示，无持久化
+     */
+    fun showLocationPermissionNotice(message: String) {
+        _importNotice.value = message
+    }
+
     // ---- CSV import (atomic, AC-A2) ----
 
     /**
@@ -285,8 +299,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Exports all attempts to the 16-column audit CSV (AC-C3 + F003 stage_notes), chronological.
-     * # 导出全部尝试为 16 列审计 CSV（时间升序）
+     * Exports all attempts to the 24-column audit CSV (AC-C3 + F003 stage_notes
+     * + F002 location audit), chronological.
+     * # 导出全部尝试为 24 列审计 CSV（时间升序）
      */
     fun exportCsv() {
         viewModelScope.launch {
