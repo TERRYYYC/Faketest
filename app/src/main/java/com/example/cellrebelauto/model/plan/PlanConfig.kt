@@ -15,7 +15,9 @@ data class PlanConfig(
     // # F003：位置阶段开关（Fake GPS 落点+激活验证+稳定等待），默认开
     val locationStageEnabled: Boolean = true,
     // # F003：CellRebel 测试阶段开关，默认开
-    val testStageEnabled: Boolean = true
+    val testStageEnabled: Boolean = true,
+    // # F002：位置验证容差（米，OQ-F2-1 默认 100，per-attempt 快照读取）
+    val locationToleranceMeters: Double = 100.0
 )
 
 /**

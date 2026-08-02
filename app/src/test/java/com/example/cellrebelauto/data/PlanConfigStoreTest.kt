@@ -137,4 +137,31 @@ class PlanConfigStoreTest {
         assertEquals(true, persisted.locationStageEnabled)
         assertEquals(false, persisted.testStageEnabled)
     }
+
+    @Test
+    fun `location tolerance defaults to 100 and is independently writable`() = runTest {
+        // # F002 OQ-F2-1：容差默认 100m，独立读写不影响其他字段
+        val store = newStore(backgroundScope)
+        assertEquals(100.0, store.config.first().locationToleranceMeters, 0.0001)
+
+        store.setLocationToleranceMeters(250.0)
+        val config = store.config.first()
+        assertEquals(250.0, config.locationToleranceMeters, 0.0001)
+        assertEquals(90, config.testTimeoutSeconds)
+        assertEquals(true, config.locationStageEnabled)
+    }
+
+    @Test
+    fun `location tolerance persists across a new store instance over the same file`() = runTest {
+        // # F002：容差跨实例持久化（与其他字段同模式；cancel 后 join 确保
+        // # 旧 DataStore 完全关闭，避免同文件双实例竞态）
+        val scope1 = CoroutineScope(backgroundScope.coroutineContext + Job())
+        val store1 = newStore(scope1)
+        store1.setLocationToleranceMeters(75.5)
+        scope1.cancel()
+        scope1.coroutineContext[Job]!!.join()
+
+        val store2 = newStore(backgroundScope)
+        assertEquals(75.5, store2.config.first().locationToleranceMeters, 0.0001)
+    }
 }

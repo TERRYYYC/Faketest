@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.doublePreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -34,6 +35,8 @@ class PlanConfigStore(
         // # F003：阶段开关（缺省 = 默认开）
         val LOCATION_STAGE_ENABLED = booleanPreferencesKey("location_stage_enabled")
         val TEST_STAGE_ENABLED = booleanPreferencesKey("test_stage_enabled")
+        // # F002：位置验证容差（米，缺省 = 100）
+        val LOCATION_TOLERANCE_METERS = doublePreferencesKey("location_tolerance_meters")
     }
 
     val config: Flow<PlanConfig> = dataStore.data.map { prefs ->
@@ -42,7 +45,8 @@ class PlanConfigStore(
             testTimeoutSeconds = prefs[Keys.TEST_TIMEOUT_SECONDS] ?: 90,
             gpsSettleSeconds = prefs[Keys.GPS_SETTLE_SECONDS] ?: 60,
             locationStageEnabled = prefs[Keys.LOCATION_STAGE_ENABLED] ?: true,
-            testStageEnabled = prefs[Keys.TEST_STAGE_ENABLED] ?: true
+            testStageEnabled = prefs[Keys.TEST_STAGE_ENABLED] ?: true,
+            locationToleranceMeters = prefs[Keys.LOCATION_TOLERANCE_METERS] ?: 100.0
         )
     }
 
@@ -66,5 +70,10 @@ class PlanConfigStore(
     // # F003：CellRebel 测试阶段开关（运行时偏好，下个 attempt 生效）
     suspend fun setTestStageEnabled(enabled: Boolean) {
         dataStore.edit { it[Keys.TEST_STAGE_ENABLED] = enabled }
+    }
+
+    // # F002：位置验证容差（运行时偏好，per-attempt 快照读取）
+    suspend fun setLocationToleranceMeters(meters: Double) {
+        dataStore.edit { it[Keys.LOCATION_TOLERANCE_METERS] = meters }
     }
 }
