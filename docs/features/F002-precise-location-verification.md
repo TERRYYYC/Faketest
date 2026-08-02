@@ -8,10 +8,11 @@ created: 2026-08-01
 
 # F002: Precise Location Selection & Spoof Verification (v2.1)
 
-> **Status**: spec | **Owner**: @kimi | **Reviewer**: @codex-sol | **Priority**: P1 (operator-declared: "聚焦地址的问题，这个很重要")
+> **Status**: in-progress — L1 gate delivered + device-verified (gate toggle added per v2.2); L2 pending the operator's own location-app capability | **Owner**: @kimi | **Reviewer**: @codex-sol | **Priority**: P1 (operator-declared: "聚焦地址的问题，这个很重要")
 > **Upstream**: [issue #3](https://github.com/TERRYYYC/Faketest/issues/3) with 2026-08-02 device experiment conclusions
 > **v2**: revised per reviewer contract fixes (2026-08-01 23:20 UTC): verification decoupled from the location stage, Android-15-correct mock detection, fresh-fix sampling, runtime-permission preflight, structured audit fields, mandatory precise-path delivery.
 > **v2.1**: second reviewer pass (2026-08-01 23:41 UTC): gate also covers `ok_gps_only` quota counting, activation-anchor freshness, permanent/recoverable failure classes with no infinite retry, `real-location-allowed` bypass removed, F003 doc truth-sync.
+> **v2.2**: operator amendments (2026-08-02 19:26 UTC): (1) the gate gets an operator-controlled runtime ON/OFF toggle (default ON) — OFF skips pre-start preflight AND per-attempt verification, attempts run unverified with blank audit columns (blank = unverified is the honesty signal), per-attempt re-read so mid-plan flips take effect next attempt; mock-required contract is unchanged whenever the gate is ON. (2) L2 redirected: the A/B/C/D options from the spike decision record were all rejected to preserve `FakeGps-test` independence; the operator will develop a new location capability (Google Mock Location exploration) in his own app, and F002 L2 integrates when it lands. L1 delivered + device-verified; F002 stays open until L2.
 
 ## Why
 
@@ -64,10 +65,11 @@ Time-boxed spike, output is a decision record, then implement the winner:
 
 ## Acceptance Criteria
 
-- [ ] AC-F2-1: The verification gate runs before every CellRebel attempt **and before every `ok_gps_only` quota count** — including when either F003 stage toggle is OFF; typed failures (`LOCATION_PERMISSION_DENIED`, `LOCATION_APPROXIMATE_ONLY`, `LOCATION_NO_FIX`, `LOCATION_STALE_FIX`, `LOCATION_VERIFY_TIMEOUT`, `LOCATION_NOT_MOCKED`, `LOCATION_MISMATCH`) never consume quota. Unit tests with fake location providers.
-- [ ] AC-F2-2: Mock detection uses `Location.isMock()`; no satellites/last-known-only heuristics in the decision path; freshness requires monotonic timestamps with an explicit budget AND (Location ON) a fix not older than the attempt's activation anchor.
-- [ ] AC-F2-2b: Permanent failures (permission denied/revoked, coarse-only) block start preflight or pause the session mid-run; they never enter the buffer retry loop. Recoverable failures retry only after the global buffer.
-- [ ] AC-F2-3: Audit records actual lat/lng, error meters, mock flag, fix/verification timestamps, accuracy, and the tolerance used; History + export show them (v5 additive migration with test).
+- [x] AC-F2-1: The verification gate runs before every CellRebel attempt **and before every `ok_gps_only` quota count** — including when either F003 stage toggle is OFF; typed failures (`LOCATION_PERMISSION_DENIED`, `LOCATION_APPROXIMATE_ONLY`, `LOCATION_NO_FIX`, `LOCATION_STALE_FIX`, `LOCATION_VERIFY_TIMEOUT`, `LOCATION_NOT_MOCKED`, `LOCATION_MISMATCH`) never consume quota. Unit tests with fake location providers. *(verified: 120-test suite incl. 9-case engine matrix; device: ACCEPT 0.046m / MISMATCH 1549m ×9 / NOT_MOCKED ×9)*
+- [x] AC-F2-2: Mock detection uses `Location.isMock()`; no satellites/last-known-only heuristics in the decision path; freshness requires monotonic timestamps with an explicit budget AND (Location ON) a fix not older than the attempt's activation anchor.
+- [x] AC-F2-2b: Permanent failures (permission denied/revoked, coarse-only) block start preflight or pause the session mid-run; they never enter the buffer retry loop. Recoverable failures retry only after the global buffer.
+- [x] AC-F2-3: Audit records actual lat/lng, error meters, mock flag, fix/verification timestamps, accuracy, and the tolerance used; History + export show them (v5 additive migration with test). *(device: audit survives process-kill interruption; 24-column export verified)*
+- [x] AC-F2-6 (v2.2): The gate has an operator-controlled runtime toggle, default ON, re-read per attempt; OFF skips pre-start preflight and per-attempt verification; unverified attempts carry blank audit columns and a log marker.
 - [ ] AC-F2-4: At least one precise-selection path is delivered and proven on device: ≥9/10 attempts within tolerance at non-addressable coordinates (park/river-class points where geocoding snap is large). If the spike yields no path, F002 remains open.
 - [ ] AC-F2-5: Device verification run on the moto g54 demonstrates: address-snap point (would-be ~1 km error) is REJECTED by the gate, and the L2 precise path is ACCEPTED.
 
@@ -92,3 +94,4 @@ Time-boxed spike, output is a decision record, then implement the winner:
 |------|------|
 | 2026-08-01 | Operator declared address precision the top priority; issue #3 filed; spec v1 drafted |
 | 2026-08-02 | Device experiments confirmed root cause and verification channels; reviewer returned v1 with 6 contract fixes (stage-independent gate, isMock, fresh-fix sampling, permission preflight, structured audit fields, mandatory L2); spec v2. Second pass added 4 contract fixes + F003 truth-sync (v2.1) |
+| 2026-08-02 | L1 implemented on `feat/f002-precise-location` (120 tests green, lint clean) and device-verified on moto g54 (ACCEPT 0.046m / MISMATCH 1549m / NOT_MOCKED on real-GPS leak / audit survives process kill); L2 spike decision: caiyao path wins but A/B/C/D rejected by operator (FakeGps-test independence) — L2 redirected to the operator's own app capability (v2.2); operator-declared gate ON/OFF toggle added (v2.2) |
