@@ -61,6 +61,18 @@ created: 2026-08-02
 - caiyao `mock_location` appop 已在 spike 后还原 `default`；设备 DB 里留有 plan #1（完成）与 plan #2（0/1，9+9 次失败记录）作为审计样本。
 - Google 账号安全确认弹窗（"是您本人在尝试恢复账号吗？"）出现过一次，**未作答**，按 BACK 退出——可能与新安装/位置变动有关，请 operator 自行留意。
 
+## 7. 闸门开关（v2.2 operator toggle）设备冒烟（`f002_export_toggle.csv`）
+
+- 同一个 plan（target 偏移 1.5km）、mock 关闭状态下做 A/B 对照：
+  - 闸门 ON（attempt 18）：`failed: LOCATION_NOT_MOCKED`，零配额，审计行齐全。
+  - 闸门 OFF（attempt 19）：**跳过验证**直接进入 CellRebel 生命周期（`running observed 22:38:34`），导出行 8 个审计列**全空**（空白 = 未验证）。
+- 开关经 UI 切换、DataStore 持久化，冒烟后已拨回 ON。
+
+## 设备运行中发现的预存 bug（非 F002 引入，记录在案）
+
+- `returnToSelf` 在 recents 卡片动画期间取到的坐标可能非法 → `AccessibilityBridge.dispatchTap` 构造 `GestureDescription.StrokeDescription` 抛出 `IllegalArgumentException: Path bounds must not be negative`（attempt 19 被此异常终态化为 interrupted，错误路径终态化行为本身正确）。
+- 根因方向：`dispatchTap` 缺坐标合法性守卫。未修——超出 F002 范围，待 operator 定优先级。
+
 ## 未覆盖（等 L2 拍板后补）
 
 - AC-F2-4：非可寻址坐标 ≥9/10 在容差内（需 caiyao 精确路径）。
