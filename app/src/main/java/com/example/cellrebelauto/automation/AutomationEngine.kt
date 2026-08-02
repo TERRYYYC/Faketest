@@ -64,15 +64,17 @@ data class LastFailureInfo(
  *   3. BufferGate wait from persisted last-terminal endedAt (INV-5, after
  *      BOTH success and failure)
  *   4. Fake GPS setLocation (skippable, F003) — failure → typed failed attempt,
- *      NO quota consumed (INV-10); GPS settle after confirmed activation (F3);
- *      CellRebel stage OFF → ok_gps_only terminal counting quota (F003)
+ *      NO quota consumed (INV-10); GPS settle after confirmed activation (F3)
+ *   4b. Location gate (F002 L1) BEFORE either counting path — CellRebel launch
+ *      AND ok_gps_only finalization, regardless of stage toggles (INV-F2-1);
+ *      permanent failure → session paused, never retried (INV-F2-3)
  *   5. runTest — Success finalized in ONE Room transaction (attempt row +
  *      guarded task increment, INV-3); Failure persisted with typed reason (INV-4)
  *   6. quota met → task completed; all complete → session completed
  *
  * # 计划驱动的自动化编排器（F001）：恢复清扫优先 → 确定性选任务 →
- * # 缓冲门禁 → GPS 稳定/落点（失败即停、不占配额）→ 已验证测试 →
- * # 单事务成功收尾 / 类型化失败记录 → 配额完成推进
+ * # 缓冲门禁 → GPS 稳定/落点（失败即停、不占配额）→ 位置验证闸门（F002，不占配额）→
+ * # 已验证测试 → 单事务成功收尾 / 类型化失败记录 → 配额完成推进
  */
 class AutomationEngine(
     private val planId: Long,
@@ -82,6 +84,12 @@ class AutomationEngine(
     private val bufferGate: BufferGate,
     private val testTimeoutMs: Long,
     private val gpsSettleMs: Long,
+    // # F002：位置验证闸门（配额事件前必过，INV-F2-1）
+    private val locationGate: LocationGate,
+    // # F002：容差 per-attempt 快照（OQ-F2-1，audit 回显实际使用值）
+    private val locationToleranceMeters: suspend () -> Double,
+    // # F002：激活锚点时钟（生产 = SystemClock.elapsedRealtimeNanos()）
+    private val elapsedRealtimeNanos: () -> Long,
     // # F003：阶段开关快照提供者，每次 attempt 重新读取（AC-F3-5）
     private val stageToggles: suspend () -> StageToggles = { StageToggles() },
     // # 仅用于 returnToSelf（MIUI 中转）；测试不传
@@ -157,6 +165,20 @@ class AutomationEngine(
             val plan = planRepository.getPlan(planId)
             if (plan == null) {
                 log("ERROR: plan #$planId not found")
+                updateState(AutomationState.ERROR)
+                return@coroutineScope
+            }
+
+            // ==================== Step 1b: location permission preflight (F002 AC-F2-2b) ====================
+            // # 启动前预检：权限缺失/仅粗略 = 永久失败——明确原因拒绝启动，
+            // # 不建 session、不建 attempt
+            val preflight = locationGate.preflight()
+            if (preflight != LocationPermissionState.FINE) {
+                val why = if (preflight == LocationPermissionState.DENIED)
+                    "location permission denied"
+                else
+                    "coarse-only location grant (precise/fine location required)"
+                log("ERROR: pre-start location preflight failed: $why")
                 updateState(AutomationState.ERROR)
                 return@coroutineScope
             }
@@ -251,6 +273,9 @@ class AutomationEngine(
                 )
 
                 // ==================== Location stage（AC-F3-2：OFF 则整段跳过） ====================
+                // # F002 激活锚点（仅位置阶段 ON 时捕获）：接受的 fix 不得早于
+                // # 本次 Fake GPS 激活观察点（AC-F2-2）
+                var anchorNanos: Long? = null
                 if (toggles.locationStageEnabled) {
                     // # Fake GPS（失败即停，INV-10）
                     updateState(AutomationState.LAUNCHING_FAKE_GPS)
@@ -266,6 +291,8 @@ class AutomationEngine(
                         tasks = planRepository.getTasks(planId)
                         continue
                     }
+                    // # 激活确认后的第一行即捕获锚点（在 settle 等待之前）
+                    anchorNanos = elapsedRealtimeNanos()
 
                     // # GPS 稳定等待（F3）：锚在新坐标激活确认之后、CellRebel 启动之前，
                     // # 旅程顺序 = Setting GPS → GPS settling → Testing
@@ -277,6 +304,43 @@ class AutomationEngine(
                     }
                 } else {
                     log("Location stage OFF — skipping Fake GPS entirely (gps_skipped)")
+                }
+
+                // ==================== F002 位置验证闸门（L1，INV-F2-1） ====================
+                // # 任何 toggle 组合都不例外：闸门通过前既不许启动 CellRebel，
+                // # 也不许计 ok_gps_only 配额；7 种类型化失败均不占配额（AC-F2-1）
+                val anchor = if (toggles.locationStageEnabled)
+                    GateAnchor.ActivationAnchor(anchorNanos!!)
+                else
+                    GateAnchor.FreshFix
+                when (val gateResult = locationGate.verify(
+                    task.latitude, task.longitude, anchor, locationToleranceMeters()
+                )) {
+                    is LocationGateResult.Rejected -> {
+                        gateResult.audit?.let { planRepository.recordLocationAudit(attemptId, it) }
+                        planRepository.finalizeAttemptFailure(attemptId, gateResult.reason.name, nowMs())
+                        if (LocationGateLogic.isPermanentFailure(gateResult.reason)) {
+                            // # INV-F2-3：永久失败 → session 暂停（operator 可见原因），绝不重试
+                            log("Location gate PERMANENT failure: ${gateResult.reason} — session paused, no retry")
+                            updateState(AutomationState.PAUSED)
+                            planRepository.finishSession(runSessionId, "paused", nowMs(), _cycleCount.value)
+                            currentAttemptId = null
+                            returnToSelf()
+                            return@coroutineScope
+                        }
+                        // # 可恢复：类型化失败收尾，continue → buffer gate 自然生效（INV-5 血缘）
+                        log("Location gate rejected: ${gateResult.reason} — typed failed attempt, no quota consumed")
+                        updateState(AutomationState.FAILED)
+                        _lastFailure.value = LastFailureInfo(attemptOrdinal, gateResult.reason.name)
+                        currentAttemptId = null
+                        returnToSelf()
+                        tasks = planRepository.getTasks(planId)
+                        continue
+                    }
+                    is LocationGateResult.Verified -> {
+                        // # AC-F2-3：闸门通过 → 审计八字段落库（INV-F2-4 唯一写入点）
+                        planRepository.recordLocationAudit(attemptId, gateResult.audit)
+                    }
                 }
 
                 // ==================== Test stage OFF：GPS 验证即终态（AC-F3-3） ====================

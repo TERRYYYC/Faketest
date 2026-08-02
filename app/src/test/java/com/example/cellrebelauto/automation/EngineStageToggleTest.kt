@@ -81,6 +81,29 @@ class EngineStageToggleTest {
         val delayMs: suspend (Long) -> Unit = { ms -> delays.add(ms); now += ms }
     }
 
+    /**
+     * Always-Verified gate for pre-F002 tests: real LocationGate with a fine
+     * permission checker and a sampler whose fix passes any anchor/budget.
+     * # 恒定 Verified 的闸门（F002 之前的用例）：真实 LocationGate +
+     * # 细权限 + 任意锚点/预算都能通过的 fix
+     */
+    private fun alwaysVerifiedGate() = LocationGate(
+        permissionChecker = object : LocationPermissionChecker {
+            override fun current() = LocationPermissionState.FINE
+        },
+        sampler = object : LocationFixSampler {
+            override suspend fun sampleFix() = SampleResult.Fix(
+                ObservedFix(
+                    latitude = 39.9, longitude = 116.4, accuracyMeters = 3.0f,
+                    isMock = true, elapsedRealtimeNanos = Long.MAX_VALUE, fixAtMs = 0L
+                )
+            )
+        },
+        nowNanos = { 0L },
+        nowMs = { 0L },
+        distanceMeters = { _, _, _, _ -> 0f }
+    )
+
     private suspend fun seedPlan(quota: Int): Pair<Long, Long> {
         val planId = db.planDao().insertPlanWithTasks(
             LocationPlan(
@@ -113,6 +136,9 @@ class EngineStageToggleTest {
         bufferGate = BufferGate(bufferSeconds, clock.nowMs),
         testTimeoutMs = 90_000L,
         gpsSettleMs = gpsSettleMs,
+        locationGate = alwaysVerifiedGate(),
+        locationToleranceMeters = { LocationGateLogic.DEFAULT_TOLERANCE_METERS },
+        elapsedRealtimeNanos = { 0L },
         stageToggles = toggles,
         nowMs = clock.nowMs,
         delayMs = clock.delayMs

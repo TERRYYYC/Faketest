@@ -286,6 +286,10 @@ class AutomationService : AccessibilityService() {
                 bufferGate = BufferGate(plan.globalBufferSeconds) { System.currentTimeMillis() },
                 testTimeoutMs = planConfig.testTimeoutSeconds * 1000L,
                 gpsSettleMs = planConfig.gpsSettleSeconds * 1000L,
+                // # F002：位置验证闸门（L1）；容差 per-attempt 快照（OQ-F2-1）
+                locationGate = buildAndroidLocationGate(applicationContext),
+                locationToleranceMeters = { configStore.config.first().locationToleranceMeters },
+                elapsedRealtimeNanos = { android.os.SystemClock.elapsedRealtimeNanos() },
                 // # F003：每次 attempt 重新读取开关（AC-F3-5 中途切换下个 attempt 生效）
                 stageToggles = {
                     val c = configStore.config.first()

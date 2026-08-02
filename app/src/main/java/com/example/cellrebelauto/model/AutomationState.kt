@@ -58,5 +58,7 @@ enum class AutomationState(val displayName: String) {
     // # 所有循环已完成
     DONE("Done"),
     // # 发生不可恢复的错误
-    ERROR("Error")
+    ERROR("Error"),
+    // # F002：位置永久失败（权限被拒/仅粗略）→ session 暂停，operator 恢复后再按 Start
+    PAUSED("Paused")
 }
