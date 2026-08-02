@@ -7,25 +7,30 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Pure mapping from attempt rows to the 16-column audit CSV (AC-C3 + F003).
- * No Android deps — JVM-unit-testable; CsvExporter consumes this.
- * # 尝试行 → 16 列审计 CSV 的纯映射。无 Android 依赖，可 JVM 单测
+ * Pure mapping from attempt rows to the 24-column audit CSV (AC-C3 + F003 +
+ * F002 location audit). No Android deps — JVM-unit-testable; CsvExporter
+ * consumes this.
+ * # 尝试行 → 24 列审计 CSV 的纯映射。无 Android 依赖，可 JVM 单测
  *
  * Column semantics:
  * - plan_row: task's 1-based execution-order index within its plan (INV-1)
  * - success_ordinal / scores: non-empty ONLY on succeeded rows (INV-3/4)
  * - failure_reason: required on failed/interrupted rows (INV-10)
  * - running_observed_at: RUNNING-transition audit timestamp (AC-B2)
+ * - location audit columns (F002): non-empty only on gate-verified attempts
  * - timestamps: yyyy-MM-dd HH:mm:ss; nulls map to empty cells
  */
 object AttemptCsvMapper {
 
-    // # 审计导出表头（设计稿 v2.1 §1.3 + F003 追加 stage_notes）
+    // # 审计导出表头（设计稿 v2.1 §1.3 + F003 stage_notes + F002 八审计列）
     val HEADER: List<String> = listOf(
         "plan_row", "csv_row", "priority", "longitude", "latitude",
         "success_ordinal", "attempt_ordinal", "status", "failure_reason",
         "started_at", "running_observed_at", "ended_at",
-        "web_score", "video_score", "session_id", "stage_notes"
+        "web_score", "video_score", "session_id", "stage_notes",
+        "actual_latitude", "actual_longitude", "location_error_meters",
+        "fix_is_mock", "fix_at", "verified_at",
+        "fix_accuracy_meters", "tolerance_meters_used"
     )
 
     private val timestampFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US)
@@ -57,16 +62,25 @@ object AttemptCsvMapper {
                 a.webBrowsingScore?.toString() ?: "",
                 a.videoStreamingScore?.toString() ?: "",
                 a.runSessionId.toString(),
-                a.stageNotes ?: "" // # F003 INV-F3-1：跳过标记随审计导出
+                a.stageNotes ?: "", // # F003 INV-F3-1：跳过标记随审计导出
+                // # F002 AC-F2-3：位置审计八列；null → 空单元格
+                a.actualLatitude?.toString() ?: "",
+                a.actualLongitude?.toString() ?: "",
+                a.locationErrorMeters?.toString() ?: "",
+                a.fixIsMock?.toString() ?: "",
+                a.fixAt?.let { formatTs(it) } ?: "",
+                a.verifiedAt?.let { formatTs(it) } ?: "",
+                a.fixAccuracyMeters?.toString() ?: "",
+                a.toleranceMetersUsed?.toString() ?: ""
             )
         } + legacyResults.map { legacyToCsvRow(it) }
 
     /**
-     * Maps one legacy v2 test_results row into the 16-column audit shape (C1):
+     * Maps one legacy v2 test_results row into the 24-column audit shape (C1):
      * real values for coords/status/scores/session, started_at = legacy
-     * timestamp, every plan-era field blank.
-     * # v2 遗留行 → 16 列审计结构：坐标/状态/分数/会话填真实值，
-     * # started_at = 遗留时间戳，计划时代字段一律留空
+     * timestamp, every plan-era and location-audit field blank.
+     * # v2 遗留行 → 24 列审计结构：坐标/状态/分数/会话填真实值，
+     * # started_at = 遗留时间戳，计划时代与位置审计字段一律留空
      */
     fun legacyToCsvRow(result: TestResult): List<String> =
         listOf(
@@ -85,7 +99,15 @@ object AttemptCsvMapper {
             result.webBrowsingScore.toString(),
             result.videoStreamingScore.toString(),
             result.runSessionId.toString(),
-            ""                                    // stage_notes（遗留行无跳过）
+            "",                                   // stage_notes（遗留行无跳过）
+            "",                                   // actual_latitude
+            "",                                   // actual_longitude
+            "",                                   // location_error_meters
+            "",                                   // fix_is_mock
+            "",                                   // fix_at
+            "",                                   // verified_at
+            "",                                   // fix_accuracy_meters
+            ""                                    // tolerance_meters_used
         )
 
     private fun formatTs(epochMs: Long): String = timestampFormat.format(Date(epochMs))

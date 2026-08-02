@@ -10,8 +10,9 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * Pure mapping tests for the 16-column audit CSV (AC-C3 + F003 stage_notes).
- * # 16 列审计 CSV 纯映射测试
+ * Pure mapping tests for the 24-column audit CSV (AC-C3 + F003 stage_notes
+ * + F002 location audit columns).
+ * # 24 列审计 CSV 纯映射测试
  */
 class AttemptCsvMapperTest {
 
@@ -47,29 +48,59 @@ class AttemptCsvMapperTest {
     )
 
     @Test
-    fun `header is exactly the 16 audit columns in order`() {
-        // # F003：stage_notes 为第 16 列（追加在末尾）
+    fun `header is exactly the 24 audit columns in order`() {
+        // # F002：stage_notes 为第 16 列，8 个位置审计列追加在末尾
         assertEquals(
             listOf(
                 "plan_row", "csv_row", "priority", "longitude", "latitude",
                 "success_ordinal", "attempt_ordinal", "status", "failure_reason",
                 "started_at", "running_observed_at", "ended_at",
-                "web_score", "video_score", "session_id", "stage_notes"
+                "web_score", "video_score", "session_id", "stage_notes",
+                "actual_latitude", "actual_longitude", "location_error_meters",
+                "fix_is_mock", "fix_at", "verified_at",
+                "fix_accuracy_meters", "tolerance_meters_used"
             ),
             AttemptCsvMapper.HEADER
         )
     }
 
     @Test
-    fun `attempt row carries stage notes in the trailing column`() {
+    fun `attempt row carries stage notes in column 16`() {
         // # F003 INV-F3-1：跳过标记随审计行导出；无跳过为空
         val skipped = successItem().copy(
             attempt = successItem().attempt.copy(stageNotes = "gps_skipped")
         )
         val rows = AttemptCsvMapper.toCsvRows(listOf(skipped, successItem()))
-        assertEquals(16, rows[0].size)
+        assertEquals(24, rows[0].size)
         assertEquals("gps_skipped", rows[0][15])
         assertEquals("", rows[1][15])
+    }
+
+    @Test
+    fun `attempt with audit fields serializes all eight trailing columns`() {
+        // # F002 AC-F2-3：审计八字段全部序列化；fix_at/verified_at 走 formatTs
+        val audited = successItem().copy(
+            attempt = successItem().attempt.copy(
+                actualLatitude = 31.2401, actualLongitude = 121.4741,
+                locationErrorMeters = 42.5, fixIsMock = true,
+                fixAt = 1_753_900_030_000L, verifiedAt = 1_753_900_031_000L,
+                fixAccuracyMeters = 3.5, toleranceMetersUsed = 100.0
+            )
+        )
+        val row = AttemptCsvMapper.toCsvRows(listOf(audited))[0]
+        assertEquals(24, row.size)
+        assertEquals("31.2401", row[16])                       // actual_latitude
+        assertEquals("121.4741", row[17])                      // actual_longitude
+        assertEquals("42.5", row[18])                          // location_error_meters
+        assertEquals("true", row[19])                          // fix_is_mock
+        assertEquals(fmt(1_753_900_030_000L), row[20])         // fix_at
+        assertEquals(fmt(1_753_900_031_000L), row[21])         // verified_at
+        assertEquals("3.5", row[22])                           // fix_accuracy_meters
+        assertEquals("100.0", row[23])                         // tolerance_meters_used
+
+        // # 无审计字段的尝试行：8 个尾列全空
+        val plain = AttemptCsvMapper.toCsvRows(listOf(successItem()))[0]
+        (16..23).forEach { assertEquals("", plain[it]) }
     }
 
     @Test
@@ -145,7 +176,7 @@ class AttemptCsvMapperTest {
 
     @Test
     fun `legacy result maps with real values and blank plan fields`() {
-        // # C1：v2 遗留行并入同一份 16 列 CSV——真实值按映射，计划字段留空
+        // # C1：v2 遗留行并入同一份 24 列 CSV——真实值按映射，计划字段留空
         val row = AttemptCsvMapper.legacyToCsvRow(legacyResult())
         assertEquals(AttemptCsvMapper.HEADER.size, row.size)
         assertEquals("", row[0])               // plan_row 空
@@ -164,6 +195,8 @@ class AttemptCsvMapperTest {
         assertEquals("7.5", row[13])           // video_score 真实值
         assertEquals("42", row[14])            // session_id = runSessionId
         assertEquals("", row[15])              // stage_notes 空（F003，遗留行无跳过）
+        // # F002：遗留行无位置审计，8 个尾列全空
+        (16..23).forEach { assertEquals("", row[it]) }
     }
 
     @Test
