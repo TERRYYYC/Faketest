@@ -14,11 +14,11 @@ import com.example.cellrebelauto.model.plan.TestAttempt
 
 /**
  * Room database singleton.
- * # Room 数据库单例，版本 4（F003 阶段开关审计列）
+ * # Room 数据库单例，版本 5（F002 位置验证审计列）
  */
 @Database(
     entities = [TestResult::class, RunSession::class, LocationPlan::class, LocationTask::class, TestAttempt::class],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -101,6 +101,24 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v4 -> v5 (F002): test_attempts gains the 8 nullable location-audit
+         * columns. Additive only — no existing data touched (AC-F2-3).
+         * # v4 到 v5（F002）：test_attempts 增加 8 个可空位置审计列，纯增量
+         */
+        val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE test_attempts ADD COLUMN actualLatitude REAL")
+                db.execSQL("ALTER TABLE test_attempts ADD COLUMN actualLongitude REAL")
+                db.execSQL("ALTER TABLE test_attempts ADD COLUMN locationErrorMeters REAL")
+                db.execSQL("ALTER TABLE test_attempts ADD COLUMN fixIsMock INTEGER")
+                db.execSQL("ALTER TABLE test_attempts ADD COLUMN fixAt INTEGER")
+                db.execSQL("ALTER TABLE test_attempts ADD COLUMN verifiedAt INTEGER")
+                db.execSQL("ALTER TABLE test_attempts ADD COLUMN fixAccuracyMeters REAL")
+                db.execSQL("ALTER TABLE test_attempts ADD COLUMN toleranceMetersUsed REAL")
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 Room.databaseBuilder(
@@ -109,7 +127,7 @@ abstract class AppDatabase : RoomDatabase() {
                     "cellrebel_auto.db"
                 )
                     // # 非破坏性迁移：保留历史数据
-                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     .build()
                     .also { INSTANCE = it }
             }

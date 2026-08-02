@@ -112,6 +112,30 @@ interface TestAttemptDao {
     suspend fun markFailed(attemptId: Long, reason: String, endedAt: Long)
 
     /**
+     * Write the location-gate audit for an attempt (F002, INV-F2-4): the ONLY
+     * writer of the 8 v5 audit columns; finalize UPDATEs must never touch them.
+     * # 写入位置闸门审计（INV-F2-4）：8 个 v5 审计列的唯一写入点，
+     * # finalize 的 UPDATE 绝不触碰它们
+     */
+    @Query(
+        "UPDATE test_attempts SET actualLatitude = :lat, actualLongitude = :lng, " +
+            "locationErrorMeters = :err, fixIsMock = :isMock, fixAt = :fixAt, " +
+            "verifiedAt = :verifiedAt, fixAccuracyMeters = :acc, " +
+            "toleranceMetersUsed = :tol WHERE id = :attemptId"
+    )
+    suspend fun recordLocationAudit(
+        attemptId: Long,
+        lat: Double?,
+        lng: Double?,
+        err: Double?,
+        isMock: Boolean?,
+        fixAt: Long?,
+        verifiedAt: Long?,
+        acc: Double?,
+        tol: Double?
+    )
+
+    /**
      * Stop/cancel path: interrupt the in-flight attempt only if still non-terminal.
      * # 停止/取消路径：仅当尝试仍为非终态时标记 interrupted
      */

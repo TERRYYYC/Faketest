@@ -7,8 +7,8 @@ import androidx.room.PrimaryKey
 import com.example.cellrebelauto.model.RunSession
 
 /**
- * Room entities for the prioritized location test plan (DB v4, F003 stageNotes).
- * # 位置测试计划的 Room 实体（数据库版本 4，F003 stageNotes）
+ * Room entities for the prioritized location test plan (DB v5, F002 location audit).
+ * # 位置测试计划的 Room 实体（数据库版本 5，F002 位置审计列）
  */
 
 /**
@@ -98,5 +98,14 @@ data class TestAttempt(
     val latitude: Double,
     val longitude: Double,
     // # F003：阶段跳过审计标记（gps_skipped / test_skipped / null=无跳过）
-    val stageNotes: String? = null
+    val stageNotes: String? = null,
+    // # F002：位置验证闸门审计列（仅经 recordLocationAudit 写入，INV-F2-4）
+    val actualLatitude: Double? = null,
+    val actualLongitude: Double? = null,
+    val locationErrorMeters: Double? = null,
+    val fixIsMock: Boolean? = null,
+    val fixAt: Long? = null,
+    val verifiedAt: Long? = null,
+    val fixAccuracyMeters: Double? = null,
+    val toleranceMetersUsed: Double? = null
 )

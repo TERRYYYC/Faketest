@@ -1,6 +1,7 @@
 package com.example.cellrebelauto.repository
 
 import androidx.room.withTransaction
+import com.example.cellrebelauto.automation.LocationAudit
 import com.example.cellrebelauto.automation.plan.PlanScheduler
 import com.example.cellrebelauto.db.AppDatabase
 import com.example.cellrebelauto.db.TaskAttemptCount
@@ -222,6 +223,23 @@ class PlanRepository(private val db: AppDatabase) {
      */
     suspend fun finalizeAttemptFailure(attemptId: Long, reason: String, endedAt: Long) =
         db.testAttemptDao().markFailed(attemptId, reason, endedAt)
+
+    /**
+     * Write the location-gate audit for an attempt (F002, INV-F2-4).
+     * # 写入位置闸门审计（INV-F2-4）
+     */
+    suspend fun recordLocationAudit(attemptId: Long, audit: LocationAudit) =
+        db.testAttemptDao().recordLocationAudit(
+            attemptId = attemptId,
+            lat = audit.actualLatitude,
+            lng = audit.actualLongitude,
+            err = audit.locationErrorMeters,
+            isMock = audit.fixIsMock,
+            fixAt = audit.fixAt,
+            verifiedAt = audit.verifiedAt,
+            acc = audit.fixAccuracyMeters,
+            tol = audit.toleranceMetersUsed
+        )
 
     // # 停止/取消：仅在途尝试仍为非终态时标记 interrupted
     suspend fun markAttemptInterruptedIfNonTerminal(attemptId: Long, nowMs: Long) =

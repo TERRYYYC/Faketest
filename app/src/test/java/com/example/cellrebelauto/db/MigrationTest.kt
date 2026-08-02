@@ -95,8 +95,141 @@ class MigrationTest {
 
     private fun openRoomDb(): AppDatabase =
         Room.databaseBuilder(context, AppDatabase::class.java, dbName)
-            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
+            .addMigrations(AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5)
             .build()
+
+    /**
+     * Builds a genuine v4 database (v3 + stageNotes, WITHOUT the v5 audit columns).
+     * # 手工构建真正的 v4 库（v3 全部 + stageNotes，无 v5 审计列）
+     */
+    private fun createV4Database() {
+        val helper = object : SQLiteOpenHelper(context, dbName, null, 4) {
+            override fun onCreate(db: SQLiteDatabase) {
+                // # v2 两张旧表
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `run_sessions` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`startedAt` INTEGER NOT NULL, `endedAt` INTEGER, " +
+                        "`status` TEXT NOT NULL, `configSnapshot` TEXT NOT NULL, " +
+                        "`totalCycles` INTEGER NOT NULL, `planId` INTEGER)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `test_results` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`runSessionId` INTEGER NOT NULL, `timestamp` INTEGER NOT NULL, " +
+                        "`webBrowsingScore` REAL NOT NULL, `videoStreamingScore` REAL NOT NULL, " +
+                        "`latitude` REAL NOT NULL, `longitude` REAL NOT NULL, " +
+                        "`cycleIndex` INTEGER NOT NULL, `status` TEXT NOT NULL, " +
+                        "FOREIGN KEY(`runSessionId`) REFERENCES `run_sessions`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_test_results_runSessionId` ON `test_results`(`runSessionId`)")
+                // # v3 三张计划表 + v4 stageNotes
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `location_plans` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`sourceFileName` TEXT NOT NULL, `importedAt` INTEGER NOT NULL, " +
+                        "`globalBufferSeconds` INTEGER NOT NULL, `totalRows` INTEGER NOT NULL, " +
+                        "`totalRequiredSuccesses` INTEGER NOT NULL)"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `location_tasks` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`planId` INTEGER NOT NULL, `csvRow` INTEGER NOT NULL, " +
+                        "`longitude` REAL NOT NULL, `latitude` REAL NOT NULL, " +
+                        "`priority` INTEGER NOT NULL, `requiredSuccesses` INTEGER NOT NULL, " +
+                        "`completedSuccesses` INTEGER NOT NULL DEFAULT 0, " +
+                        "`status` TEXT NOT NULL DEFAULT 'pending', " +
+                        "FOREIGN KEY(`planId`) REFERENCES `location_plans`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_location_tasks_planId` ON `location_tasks`(`planId`)")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `test_attempts` (" +
+                        "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "`taskId` INTEGER NOT NULL, `runSessionId` INTEGER NOT NULL, " +
+                        "`attemptOrdinal` INTEGER NOT NULL, `successOrdinal` INTEGER, " +
+                        "`startedAt` INTEGER NOT NULL, `runningObservedAt` INTEGER, " +
+                        "`endedAt` INTEGER, `status` TEXT NOT NULL, `failureReason` TEXT, " +
+                        "`webBrowsingScore` REAL, `videoStreamingScore` REAL, " +
+                        "`latitude` REAL NOT NULL, `longitude` REAL NOT NULL, " +
+                        "`stageNotes` TEXT, " +
+                        "FOREIGN KEY(`taskId`) REFERENCES `location_tasks`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE, " +
+                        "FOREIGN KEY(`runSessionId`) REFERENCES `run_sessions`(`id`) " +
+                        "ON UPDATE NO ACTION ON DELETE CASCADE)"
+                )
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_test_attempts_taskId` ON `test_attempts`(`taskId`)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_test_attempts_runSessionId` ON `test_attempts`(`runSessionId`)")
+            }
+
+            override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) = Unit
+        }
+        helper.writableDatabase.apply {
+            execSQL("INSERT INTO run_sessions (startedAt, endedAt, status, configSnapshot, totalCycles, planId) VALUES (1000, NULL, 'running', 'plan:1', 0, 1)")
+            execSQL("INSERT INTO location_plans (id, sourceFileName, importedAt, globalBufferSeconds, totalRows, totalRequiredSuccesses) VALUES (1, 'sites.csv', 900, 60, 1, 1)")
+            execSQL("INSERT INTO location_tasks (id, planId, csvRow, longitude, latitude, priority, requiredSuccesses, completedSuccesses, status) VALUES (1, 1, 1, 116.4, 39.9, 1, 1, 0, 'active')")
+            execSQL(
+                "INSERT INTO test_attempts (taskId, runSessionId, attemptOrdinal, successOrdinal, startedAt, runningObservedAt, endedAt, status, failureReason, webBrowsingScore, videoStreamingScore, latitude, longitude, stageNotes) " +
+                    "VALUES (1, 1, 1, NULL, 1100, NULL, 1200, 'failed', 'LOCATION_MISMATCH', NULL, NULL, 39.9, 116.4, 'test_skipped')"
+            )
+            close()
+        }
+        helper.close()
+    }
+
+    @Test
+    fun `migration 4 to 5 adds audit columns and preserves attempt data`() = runTest {
+        createV4Database()
+
+        // # Room v5 打开：跑 MIGRATION_4_5 + schema 校验（不通过会抛异常）
+        val db = openRoomDb()
+
+        // # v4 数据完整保留（含 stageNotes），8 个审计列迁移后为 null
+        val attempts = db.testAttemptDao().getAttemptsForTask(1L)
+        assertEquals(1, attempts.size)
+        assertEquals("failed", attempts[0].status)
+        assertEquals("LOCATION_MISMATCH", attempts[0].failureReason)
+        assertEquals("test_skipped", attempts[0].stageNotes)
+        assertNull(attempts[0].actualLatitude)
+        assertNull(attempts[0].actualLongitude)
+        assertNull(attempts[0].locationErrorMeters)
+        assertNull(attempts[0].fixIsMock)
+        assertNull(attempts[0].fixAt)
+        assertNull(attempts[0].verifiedAt)
+        assertNull(attempts[0].fixAccuracyMeters)
+        assertNull(attempts[0].toleranceMetersUsed)
+
+        // # v5 行带审计字段写入 → 读回一致（round-trip）
+        val sessionId = db.runSessionDao().insert(
+            com.example.cellrebelauto.model.RunSession(startedAt = 2000L, planId = 1L)
+        )
+        val newAttemptId = db.testAttemptDao().insert(
+            TestAttempt(
+                taskId = 1L, runSessionId = sessionId, attemptOrdinal = 2,
+                successOrdinal = null, startedAt = 2100L, runningObservedAt = null,
+                endedAt = 2200L, status = "failed", failureReason = "LOCATION_MISMATCH",
+                webBrowsingScore = null, videoStreamingScore = null,
+                latitude = 39.9, longitude = 116.4,
+                actualLatitude = 39.91, actualLongitude = 116.41,
+                locationErrorMeters = 1000.5, fixIsMock = true,
+                fixAt = 2150L, verifiedAt = 2160L,
+                fixAccuracyMeters = 3.5, toleranceMetersUsed = 100.0
+            )
+        )
+        val written = db.testAttemptDao().getAttemptsForTask(1L)
+            .first { it.id == newAttemptId }
+        assertEquals(39.91, written.actualLatitude!!, 0.0001)
+        assertEquals(116.41, written.actualLongitude!!, 0.0001)
+        assertEquals(1000.5, written.locationErrorMeters!!, 0.001)
+        assertEquals(true, written.fixIsMock)
+        assertEquals(2150L, written.fixAt)
+        assertEquals(2160L, written.verifiedAt)
+        assertEquals(3.5, written.fixAccuracyMeters!!, 0.001)
+        assertEquals(100.0, written.toleranceMetersUsed!!, 0.001)
+
+        db.close()
+    }
 
     /**
      * Builds a genuine v3 database (v2 + plan tables, WITHOUT stageNotes).

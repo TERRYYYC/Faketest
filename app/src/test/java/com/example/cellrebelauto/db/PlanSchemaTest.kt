@@ -138,6 +138,67 @@ class PlanSchemaTest {
     }
 
     @Test
+    fun `test_attempts has the eight v5 audit columns`() {
+        // # F002 v5：test_attempts 列清单含 8 个位置审计列
+        val columns = mutableListOf<String>()
+        db.openHelper.writableDatabase.query("PRAGMA table_info(test_attempts)").use { c ->
+            while (c.moveToNext()) columns.add(c.getString(c.getColumnIndexOrThrow("name")))
+        }
+        listOf(
+            "actualLatitude", "actualLongitude", "locationErrorMeters", "fixIsMock",
+            "fixAt", "verifiedAt", "fixAccuracyMeters", "toleranceMetersUsed"
+        ).forEach { assertTrue("test_attempts must have column $it", columns.contains(it)) }
+    }
+
+    @Test
+    fun `recordLocationAudit writes all fields and markSucceeded preserves them`() = runTest {
+        // # INV-F2-4：审计列仅由 recordLocationAudit 写入；
+        // # finalize success 的 UPDATE 绝不清空它们
+        val repo = com.example.cellrebelauto.repository.PlanRepository(db)
+        val (_, taskIds) = seedPlanWithTasks()
+        val sessionId = seedSession()
+        val attemptId = db.testAttemptDao().insert(
+            attempt(taskIds[0], sessionId, 1, "starting")
+        )
+
+        repo.recordLocationAudit(
+            attemptId,
+            com.example.cellrebelauto.automation.LocationAudit(
+                actualLatitude = 39.91, actualLongitude = 116.41,
+                locationErrorMeters = 42.0, fixIsMock = true,
+                fixAt = 1500L, verifiedAt = 1600L,
+                fixAccuracyMeters = 3.5, toleranceMetersUsed = 100.0
+            )
+        )
+
+        // # 八字段读回一致
+        var row = db.testAttemptDao().getAttemptsForTask(taskIds[0]).first { it.id == attemptId }
+        assertEquals(39.91, row.actualLatitude!!, 0.0001)
+        assertEquals(116.41, row.actualLongitude!!, 0.0001)
+        assertEquals(42.0, row.locationErrorMeters!!, 0.001)
+        assertEquals(true, row.fixIsMock)
+        assertEquals(1500L, row.fixAt)
+        assertEquals(1600L, row.verifiedAt)
+        assertEquals(3.5, row.fixAccuracyMeters!!, 0.001)
+        assertEquals(100.0, row.toleranceMetersUsed!!, 0.001)
+
+        // # markSucceeded 后审计列保留
+        repo.finalizeAttemptSuccess(
+            attemptId = attemptId, taskId = taskIds[0], expectedCompletedSuccesses = 0,
+            runningObservedAt = 1550L, endedAt = 2000L, webScore = 8.0, videoScore = 7.0
+        )
+        row = db.testAttemptDao().getAttemptsForTask(taskIds[0]).first { it.id == attemptId }
+        assertEquals("succeeded", row.status)
+        assertEquals(39.91, row.actualLatitude!!, 0.0001)
+        assertEquals(42.0, row.locationErrorMeters!!, 0.001)
+        assertEquals(true, row.fixIsMock)
+        assertEquals(1500L, row.fixAt)
+        assertEquals(1600L, row.verifiedAt)
+        assertEquals(3.5, row.fixAccuracyMeters!!, 0.001)
+        assertEquals(100.0, row.toleranceMetersUsed!!, 0.001)
+    }
+
+    @Test
     fun `attempt with unknown task id violates foreign key`() = runTest {
         val sessionId = seedSession()
         try {
