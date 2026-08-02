@@ -37,6 +37,8 @@ class PlanConfigStore(
         val TEST_STAGE_ENABLED = booleanPreferencesKey("test_stage_enabled")
         // # F002：位置验证容差（米，缺省 = 100）
         val LOCATION_TOLERANCE_METERS = doublePreferencesKey("location_tolerance_meters")
+        // # F002 v2.2：位置验证闸门开关（缺省 = 开）
+        val LOCATION_GATE_ENABLED = booleanPreferencesKey("location_gate_enabled")
     }
 
     val config: Flow<PlanConfig> = dataStore.data.map { prefs ->
@@ -46,7 +48,8 @@ class PlanConfigStore(
             gpsSettleSeconds = prefs[Keys.GPS_SETTLE_SECONDS] ?: 60,
             locationStageEnabled = prefs[Keys.LOCATION_STAGE_ENABLED] ?: true,
             testStageEnabled = prefs[Keys.TEST_STAGE_ENABLED] ?: true,
-            locationToleranceMeters = prefs[Keys.LOCATION_TOLERANCE_METERS] ?: 100.0
+            locationToleranceMeters = prefs[Keys.LOCATION_TOLERANCE_METERS] ?: 100.0,
+            locationGateEnabled = prefs[Keys.LOCATION_GATE_ENABLED] ?: true
         )
     }
 
@@ -75,5 +78,10 @@ class PlanConfigStore(
     // # F002：位置验证容差（运行时偏好，per-attempt 快照读取）
     suspend fun setLocationToleranceMeters(meters: Double) {
         dataStore.edit { it[Keys.LOCATION_TOLERANCE_METERS] = meters }
+    }
+
+    // # F002 v2.2：位置验证闸门开关（运行时偏好，下个 attempt 生效）
+    suspend fun setLocationGateEnabled(enabled: Boolean) {
+        dataStore.edit { it[Keys.LOCATION_GATE_ENABLED] = enabled }
     }
 }

@@ -90,6 +90,8 @@ class AutomationEngine(
     private val locationToleranceMeters: suspend () -> Double,
     // # F002：激活锚点时钟（生产 = SystemClock.elapsedRealtimeNanos()）
     private val elapsedRealtimeNanos: () -> Long,
+    // # F002 v2.2：闸门操作员开关，每次 attempt 重读（中途切换下个 attempt 生效）
+    private val locationGateEnabled: suspend () -> Boolean = { true },
     // # F003：阶段开关快照提供者，每次 attempt 重新读取（AC-F3-5）
     private val stageToggles: suspend () -> StageToggles = { StageToggles() },
     // # 仅用于 returnToSelf（MIUI 中转）；测试不传
@@ -171,16 +173,20 @@ class AutomationEngine(
 
             // ==================== Step 1b: location permission preflight (F002 AC-F2-2b) ====================
             // # 启动前预检：权限缺失/仅粗略 = 永久失败——明确原因拒绝启动，
-            // # 不建 session、不建 attempt
-            val preflight = locationGate.preflight()
-            if (preflight != LocationPermissionState.FINE) {
-                val why = if (preflight == LocationPermissionState.DENIED)
-                    "location permission denied"
-                else
-                    "coarse-only location grant (precise/fine location required)"
-                log("ERROR: pre-start location preflight failed: $why")
-                updateState(AutomationState.ERROR)
-                return@coroutineScope
+            // # 不建 session、不建 attempt；闸门被操作员关闭时跳过（v2.2）
+            if (locationGateEnabled()) {
+                val preflight = locationGate.preflight()
+                if (preflight != LocationPermissionState.FINE) {
+                    val why = if (preflight == LocationPermissionState.DENIED)
+                        "location permission denied"
+                    else
+                        "coarse-only location grant (precise/fine location required)"
+                    log("ERROR: pre-start location preflight failed: $why")
+                    updateState(AutomationState.ERROR)
+                    return@coroutineScope
+                }
+            } else {
+                log("Location gate OFF (operator toggle) — pre-start preflight skipped")
             }
 
             runSessionId = planRepository.createSession(planId, nowMs())
@@ -308,39 +314,45 @@ class AutomationEngine(
 
                 // ==================== F002 位置验证闸门（L1，INV-F2-1） ====================
                 // # 任何 toggle 组合都不例外：闸门通过前既不许启动 CellRebel，
-                // # 也不许计 ok_gps_only 配额；7 种类型化失败均不占配额（AC-F2-1）
-                val anchor = if (toggles.locationStageEnabled)
-                    GateAnchor.ActivationAnchor(anchorNanos!!)
-                else
-                    GateAnchor.FreshFix
-                when (val gateResult = locationGate.verify(
-                    task.latitude, task.longitude, anchor, locationToleranceMeters()
-                )) {
-                    is LocationGateResult.Rejected -> {
-                        gateResult.audit?.let { planRepository.recordLocationAudit(attemptId, it) }
-                        planRepository.finalizeAttemptFailure(attemptId, gateResult.reason.name, nowMs())
-                        if (LocationGateLogic.isPermanentFailure(gateResult.reason)) {
-                            // # INV-F2-3：永久失败 → session 暂停（operator 可见原因），绝不重试
-                            log("Location gate PERMANENT failure: ${gateResult.reason} — session paused, no retry")
-                            updateState(AutomationState.PAUSED)
-                            planRepository.finishSession(runSessionId, "paused", nowMs(), _cycleCount.value)
+                // # 也不许计 ok_gps_only 配额；7 种类型化失败均不占配额（AC-F2-1）。
+                // # v2.2：操作员开关每次 attempt 重读，OFF = 不验证、不写审计
+                // #（空审计 = 未验证的诚实信号），落回 pre-F002 行为
+                if (locationGateEnabled()) {
+                    val anchor = if (toggles.locationStageEnabled)
+                        GateAnchor.ActivationAnchor(anchorNanos!!)
+                    else
+                        GateAnchor.FreshFix
+                    when (val gateResult = locationGate.verify(
+                        task.latitude, task.longitude, anchor, locationToleranceMeters()
+                    )) {
+                        is LocationGateResult.Rejected -> {
+                            gateResult.audit?.let { planRepository.recordLocationAudit(attemptId, it) }
+                            planRepository.finalizeAttemptFailure(attemptId, gateResult.reason.name, nowMs())
+                            if (LocationGateLogic.isPermanentFailure(gateResult.reason)) {
+                                // # INV-F2-3：永久失败 → session 暂停（operator 可见原因），绝不重试
+                                log("Location gate PERMANENT failure: ${gateResult.reason} — session paused, no retry")
+                                updateState(AutomationState.PAUSED)
+                                planRepository.finishSession(runSessionId, "paused", nowMs(), _cycleCount.value)
+                                currentAttemptId = null
+                                returnToSelf()
+                                return@coroutineScope
+                            }
+                            // # 可恢复：类型化失败收尾，continue → buffer gate 自然生效（INV-5 血缘）
+                            log("Location gate rejected: ${gateResult.reason} — typed failed attempt, no quota consumed")
+                            updateState(AutomationState.FAILED)
+                            _lastFailure.value = LastFailureInfo(attemptOrdinal, gateResult.reason.name)
                             currentAttemptId = null
                             returnToSelf()
-                            return@coroutineScope
+                            tasks = planRepository.getTasks(planId)
+                            continue
                         }
-                        // # 可恢复：类型化失败收尾，continue → buffer gate 自然生效（INV-5 血缘）
-                        log("Location gate rejected: ${gateResult.reason} — typed failed attempt, no quota consumed")
-                        updateState(AutomationState.FAILED)
-                        _lastFailure.value = LastFailureInfo(attemptOrdinal, gateResult.reason.name)
-                        currentAttemptId = null
-                        returnToSelf()
-                        tasks = planRepository.getTasks(planId)
-                        continue
+                        is LocationGateResult.Verified -> {
+                            // # AC-F2-3：闸门通过 → 审计八字段落库（INV-F2-4 唯一写入点）
+                            planRepository.recordLocationAudit(attemptId, gateResult.audit)
+                        }
                     }
-                    is LocationGateResult.Verified -> {
-                        // # AC-F2-3：闸门通过 → 审计八字段落库（INV-F2-4 唯一写入点）
-                        planRepository.recordLocationAudit(attemptId, gateResult.audit)
-                    }
+                } else {
+                    log("Location gate OFF (operator toggle) — attempt unverified")
                 }
 
                 // ==================== Test stage OFF：GPS 验证即终态（AC-F3-3） ====================

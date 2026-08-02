@@ -70,6 +70,7 @@ fun MainApp(vm: MainViewModel = viewModel()) {
                 onSetLocationTolerance = { vm.setLocationToleranceMeters(it) },
                 onSetLocationStage = { vm.setLocationStageEnabled(it) },
                 onSetTestStage = { vm.setTestStageEnabled(it) },
+                onSetLocationGate = { vm.setLocationGateEnabled(it) },
                 onStartOrResume = { vm.startOrResumePlan() },
                 onLocationPermissionNotice = { vm.showLocationPermissionNotice(it) },
                 onStop = { vm.stopAutomation() },

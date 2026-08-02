@@ -213,6 +213,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch { planConfigStore.setLocationToleranceMeters(meters) }
     }
 
+    // # F002 v2.2：位置验证闸门开关（运行时偏好，下个 attempt 生效）
+    fun setLocationGateEnabled(enabled: Boolean) {
+        viewModelScope.launch { planConfigStore.setLocationGateEnabled(enabled) }
+    }
+
     /**
      * Surfaces a location-permission notice through the same channel as import
      * notices (F002 Start flow); no persistence.

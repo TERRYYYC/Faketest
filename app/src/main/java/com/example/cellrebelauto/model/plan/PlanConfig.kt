@@ -17,7 +17,9 @@ data class PlanConfig(
     // # F003：CellRebel 测试阶段开关，默认开
     val testStageEnabled: Boolean = true,
     // # F002：位置验证容差（米，OQ-F2-1 默认 100，per-attempt 快照读取）
-    val locationToleranceMeters: Double = 100.0
+    val locationToleranceMeters: Double = 100.0,
+    // # F002 v2.2：位置验证闸门操作员开关，默认开；关闭 = 不验证、审计留空
+    val locationGateEnabled: Boolean = true
 )
 
 /**

@@ -72,6 +72,7 @@ fun PlanScreen(
     onSetLocationTolerance: (Double) -> Unit,
     onSetLocationStage: (Boolean) -> Unit,
     onSetTestStage: (Boolean) -> Unit,
+    onSetLocationGate: (Boolean) -> Unit,
     onStartOrResume: () -> Unit,
     onLocationPermissionNotice: (String) -> Unit,
     onStop: () -> Unit,
@@ -241,7 +242,8 @@ fun PlanScreen(
             StageTogglesSection(
                 planConfig = planConfig,
                 onSetLocationStage = onSetLocationStage,
-                onSetTestStage = onSetTestStage
+                onSetTestStage = onSetTestStage,
+                onSetLocationGate = onSetLocationGate
             )
         }
 
@@ -399,14 +401,17 @@ private fun BufferField(
 /**
  * F003 stage toggles: two independent Switch rows above Advanced. OFF skips
  * that pipeline stage per attempt; both OFF blocks Start (KD-F3-3).
+ * Plus the F002 v2.2 location-gate operator switch (independent of the
+ * both-stages-OFF guard).
  * # F003 阶段开关：两个独立开关行。关闭即每次 attempt 跳过对应阶段；
- * # 双关时 Start 被拒绝
+ * # 双关时 Start 被拒绝。另有 F002 v2.2 闸门开关（与双关守卫无关）
  */
 @Composable
 private fun StageTogglesSection(
     planConfig: PlanConfig,
     onSetLocationStage: (Boolean) -> Unit,
-    onSetTestStage: (Boolean) -> Unit
+    onSetTestStage: (Boolean) -> Unit,
+    onSetLocationGate: (Boolean) -> Unit
 ) {
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -464,6 +469,29 @@ private fun StageTogglesSection(
                     "Both stages are OFF — Start will be rejected (nothing would run)",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.error
+                )
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // # F002 v2.2：位置验证闸门开关（默认开；与双关守卫无关）
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Location verification gate", fontSize = 14.sp)
+                    Text(
+                        "OFF: skip per-attempt location verification — attempts run " +
+                            "unverified (audit columns stay blank)",
+                        fontSize = 12.sp,
+                        color = Color.Gray
+                    )
+                }
+                Switch(
+                    checked = planConfig.locationGateEnabled,
+                    onCheckedChange = onSetLocationGate
                 )
             }
         }

@@ -164,4 +164,30 @@ class PlanConfigStoreTest {
         val store2 = newStore(backgroundScope)
         assertEquals(75.5, store2.config.first().locationToleranceMeters, 0.0001)
     }
+
+    @Test
+    fun `location gate toggle defaults to ON and is independently writable`() = runTest {
+        // # F002 v2.2：闸门开关默认开，独立读写不影响其他字段
+        val store = newStore(backgroundScope)
+        assertEquals(true, store.config.first().locationGateEnabled)
+
+        store.setLocationGateEnabled(false)
+        val config = store.config.first()
+        assertEquals(false, config.locationGateEnabled)
+        assertEquals(true, config.locationStageEnabled)
+        assertEquals(100.0, config.locationToleranceMeters, 0.0001)
+    }
+
+    @Test
+    fun `location gate toggle persists across a new store instance over the same file`() = runTest {
+        // # F002 v2.2：闸门开关跨实例持久化（cancel 后 join 避免同文件双实例竞态）
+        val scope1 = CoroutineScope(backgroundScope.coroutineContext + Job())
+        val store1 = newStore(scope1)
+        store1.setLocationGateEnabled(false)
+        scope1.cancel()
+        scope1.coroutineContext[Job]!!.join()
+
+        val store2 = newStore(backgroundScope)
+        assertEquals(false, store2.config.first().locationGateEnabled)
+    }
 }

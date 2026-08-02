@@ -290,6 +290,8 @@ class AutomationService : AccessibilityService() {
                 locationGate = buildAndroidLocationGate(applicationContext),
                 locationToleranceMeters = { configStore.config.first().locationToleranceMeters },
                 elapsedRealtimeNanos = { android.os.SystemClock.elapsedRealtimeNanos() },
+                // # F002 v2.2：闸门开关每次 attempt 重读（中途切换下个 attempt 生效）
+                locationGateEnabled = { configStore.config.first().locationGateEnabled },
                 // # F003：每次 attempt 重新读取开关（AC-F3-5 中途切换下个 attempt 生效）
                 stageToggles = {
                     val c = configStore.config.first()

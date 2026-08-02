@@ -164,6 +164,7 @@ class EngineLocationGateTest {
         clock: VirtualClock,
         gate: LocationGate,
         toggles: suspend () -> StageToggles = { StageToggles() },
+        gateEnabled: suspend () -> Boolean = { true },
         bufferSeconds: Int = 0,
         delayMs: suspend (Long) -> Unit = clock.delayMs
     ) = AutomationEngine(
@@ -177,6 +178,7 @@ class EngineLocationGateTest {
         locationGate = gate,
         locationToleranceMeters = { LocationGateLogic.DEFAULT_TOLERANCE_METERS },
         elapsedRealtimeNanos = { nanos },
+        locationGateEnabled = gateEnabled,
         stageToggles = toggles,
         nowMs = clock.nowMs,
         delayMs = delayMs
@@ -476,5 +478,119 @@ class EngineLocationGateTest {
         assertEquals(3.5, attempts[0].fixAccuracyMeters!!, 0.001)
         assertEquals(100.0, attempts[0].toleranceMetersUsed!!, 0.001)
         assertEquals("succeeded", attempts[1].status)
+    }
+
+    @Test
+    fun `gate toggle off skips preflight and verification even when permission denied`() = runTest {
+        // # v2.2-1：闸门 OFF + 权限 DENIED → 预检与验证全跳过（sampler 零调用），
+        // # ok_gps_only 照常计配额（pre-F002 行为）
+        val (planId, taskId) = seedPlan(quota = 1)
+        val clock = VirtualClock().also { it.now = 5_000L }
+        val runner = FakeRunner(clock.nowMs)
+        val gps = FakeGps()
+        val checker = FakePermissionChecker(LocationPermissionState.DENIED)
+        val sampler = ScriptedSampler(
+            listOf(SampleResult.Fix(mockFix(elapsedNanos = 1_000L)))
+        )
+        buildEngine(
+            planId, runner, gps, clock,
+            buildGate(checker, sampler, clock),
+            toggles = { StageToggles(locationStageEnabled = true, testStageEnabled = false) },
+            gateEnabled = { false }
+        ).run()
+
+        assertEquals(0, sampler.calls) // # 闸门从未被调用
+        val attempt = db.testAttemptDao().getAttemptsForTask(taskId).single()
+        assertEquals("ok_gps_only", attempt.status)
+        assertEquals(1, db.locationTaskDao().getTaskById(taskId)!!.completedSuccesses)
+    }
+
+    @Test
+    fun `gate toggle off writes no audit columns on the attempt row`() = runTest {
+        // # v2.2-2：闸门 OFF（权限正常）→ 不验证、不写审计——
+        // # 空审计 = 未验证的诚实信号（v2.2）
+        val (planId, taskId) = seedPlan(quota = 1)
+        val clock = VirtualClock().also { it.now = 5_000L }
+        val runner = FakeRunner(clock.nowMs)
+        val gps = FakeGps()
+        val sampler = ScriptedSampler(
+            listOf(SampleResult.Fix(mockFix(elapsedNanos = 1_000L)))
+        )
+        buildEngine(
+            planId, runner, gps, clock,
+            buildGate(FakePermissionChecker(), sampler, clock),
+            gateEnabled = { false }
+        ).run()
+
+        assertEquals(0, sampler.calls)
+        val attempt = db.testAttemptDao().getAttemptsForTask(taskId).single()
+        assertEquals("succeeded", attempt.status)
+        assertNull(attempt.actualLatitude)
+        assertNull(attempt.actualLongitude)
+        assertNull(attempt.locationErrorMeters)
+        assertNull(attempt.fixIsMock)
+        assertNull(attempt.fixAt)
+        assertNull(attempt.verifiedAt)
+        assertNull(attempt.fixAccuracyMeters)
+        assertNull(attempt.toleranceMetersUsed)
+        assertEquals(1, db.locationTaskDao().getTaskById(taskId)!!.completedSuccesses)
+    }
+
+    @Test
+    fun `mid plan flip on to off ungates the next attempt`() = runTest {
+        // # v2.2-3：中途 ON→OFF：第一个 attempt 过闸门（有审计），
+        // # 翻转后下一个 attempt 不过闸门（无审计）——每次 attempt 重读
+        val (planId, taskId) = seedPlan(quota = 2)
+        val clock = VirtualClock().also { it.now = 5_000L }
+        var gateOn = true
+        // # 第一次测试成功后操作员把闸门关掉
+        val runner = FakeRunner(clock.nowMs, afterCall = { gateOn = false })
+        val gps = FakeGps()
+        val sampler = ScriptedSampler(
+            listOf(SampleResult.Fix(mockFix(elapsedNanos = 1_000L, fixAtMs = 4_900L)))
+        )
+        buildEngine(
+            planId, runner, gps, clock,
+            buildGate(FakePermissionChecker(), sampler, clock),
+            gateEnabled = { gateOn }
+        ).run()
+
+        val attempts = db.testAttemptDao().getAttemptsForTask(taskId)
+        assertEquals(2, attempts.size)
+        assertEquals(1, sampler.calls) // # 只有第一个 attempt 采样
+        assertEquals("succeeded", attempts[0].status)
+        assertNotNull(attempts[0].verifiedAt)
+        assertEquals("succeeded", attempts[1].status)
+        assertNull(attempts[1].verifiedAt)
+        assertEquals(2, db.locationTaskDao().getTaskById(taskId)!!.completedSuccesses)
+    }
+
+    @Test
+    fun `mid plan flip off to on regates the next attempt`() = runTest {
+        // # v2.2-4：中途 OFF→ON：第一个 attempt 不过闸门（无审计），
+        // # 翻转后下一个 attempt 恢复验证（有审计）
+        val (planId, taskId) = seedPlan(quota = 2)
+        val clock = VirtualClock().also { it.now = 5_000L }
+        var gateOn = false
+        // # 第一次测试成功后操作员把闸门打开
+        val runner = FakeRunner(clock.nowMs, afterCall = { gateOn = true })
+        val gps = FakeGps()
+        val sampler = ScriptedSampler(
+            listOf(SampleResult.Fix(mockFix(elapsedNanos = 1_000L, fixAtMs = 4_900L)))
+        )
+        buildEngine(
+            planId, runner, gps, clock,
+            buildGate(FakePermissionChecker(), sampler, clock),
+            gateEnabled = { gateOn }
+        ).run()
+
+        val attempts = db.testAttemptDao().getAttemptsForTask(taskId)
+        assertEquals(2, attempts.size)
+        assertEquals(1, sampler.calls) // # 只有第二个 attempt 采样
+        assertEquals("succeeded", attempts[0].status)
+        assertNull(attempts[0].verifiedAt)
+        assertEquals("succeeded", attempts[1].status)
+        assertNotNull(attempts[1].verifiedAt)
+        assertEquals(2, db.locationTaskDao().getTaskById(taskId)!!.completedSuccesses)
     }
 }
